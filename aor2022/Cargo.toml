@@ -25,3 +25,5 @@ path = "src/lib/lib.rs"
 
 [[bin]]
 name = "day01"
+[[bin]]
+name = "day02"
