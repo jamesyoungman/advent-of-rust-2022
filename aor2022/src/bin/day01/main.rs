@@ -1,25 +1,37 @@
 use lib::error::Fail;
+use lib::iterplus::sum_result;
 use std::str;
 
-fn ordered_calories(input: &[Option<u64>]) -> Vec<u64> {
-    let mut result: Vec<u64> = Vec::new();
-    let mut current: u64 = 0;
+fn ordered_calories(text: &str) -> Result<Vec<u64>, Fail> {
+    let mut unsorted: Vec<u64> = text
+        .split("\n\n")
+        .map(|chunk: &str| {
+            chunk
+                .split('\n')
+                .filter(|s| !s.is_empty())
+                .map(|s: &str| -> Result<u64, Fail> {
+                    s.parse::<u64>().map_err(|e| Fail(e.to_string()))
+                })
+                .fold(Ok(0), sum_result)
+        })
+        .collect::<Result<Vec<u64>, Fail>>()?;
+    unsorted.sort_by(|a: &u64, b: &u64| b.cmp(a));
+    Ok(unsorted)
+}
 
-    let mut endgroup = |curr: &mut u64| {
-        result.push(*curr);
-        *curr = 0;
-    };
-    for line in input {
-        match line {
-            None => endgroup(&mut current),
-            Some(value) => {
-                current += value;
-            }
-        }
-    }
-    endgroup(&mut current);
-    result.sort();
-    result.into_iter().rev().collect()
+#[test]
+fn test_ordered_calories() {
+    let result = ordered_calories("1\n").expect("should parse");
+    assert!(matches!(&result[..], &[1]));
+
+    let result = ordered_calories("1\n2\n").expect("should parse");
+    assert!(matches!(&result[..], &[3]));
+
+    let result = ordered_calories("1\n\n2\n").expect("should parse");
+    assert!(matches!(&result[..], &[2, 1]));
+
+    let result = ordered_calories("1\n3\n\n2\n").expect("should parse");
+    assert!(matches!(&result[..], &[4, 2]));
 }
 
 fn most_calories(reverse_ordered: &[u64]) -> Option<u64> {
@@ -33,36 +45,13 @@ fn top3_calories(reverse_ordered: &[u64]) -> u64 {
 #[test]
 fn test_example() {
     let text = str::from_utf8(include_bytes!("example.txt")).unwrap();
-    let input: Vec<Option<u64>> = parse_input(text).expect("input should be valid");
-    let ordered = ordered_calories(&input);
+    let ordered = ordered_calories(&text).unwrap();
     assert_eq!(most_calories(&ordered), Some(24000));
     assert_eq!(top3_calories(&ordered), 45000);
 }
 
-fn parse_input(input: &str) -> Result<Vec<Option<u64>>, Fail> {
-    let mut result = Vec::new();
-    for line in input.split('\n') {
-        match line {
-            "" => {
-                result.push(None);
-            }
-            nonempty => match nonempty.parse() {
-                Ok(n) => {
-                    result.push(Some(n));
-                }
-                Err(e) => {
-                    return Err(Fail(format!("non-number {nonempty} in input: {e}")));
-                }
-            },
-        }
-    }
-    Ok(result)
-}
-
 fn main() {
-    let text = str::from_utf8(include_bytes!("input.txt")).unwrap();
-    let input: Vec<Option<u64>> = parse_input(text).expect("input should be valid");
-    let ordered = ordered_calories(&input);
+    let ordered = ordered_calories(str::from_utf8(include_bytes!("input.txt")).unwrap()).unwrap();
     println!("Day 01 part 1: {}", most_calories(&ordered).unwrap());
     println!("Day 01 part 2: {}", top3_calories(&ordered));
 }
