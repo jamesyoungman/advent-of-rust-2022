@@ -76,7 +76,49 @@ fn test_solve_part1() {
     assert_eq!(solve_part1(text), 157);
 }
 
+fn itemset(items: &str) -> HashSet<char> {
+    items.chars().collect()
+}
+
+fn common_item(sacks: &[&str]) -> Result<char, Fail> {
+    let mut sets: Vec<HashSet<char>> = sacks.iter().map(|sack| itemset(sack)).collect();
+    if let Some(acc) = sets.pop() {
+        let result: Vec<char> = sets
+            .iter()
+            .fold(acc, |acc, sack| acc.intersection(sack).copied().collect())
+            .iter()
+            .copied()
+            .collect();
+        match result.as_slice() {
+            [] => Err(Fail("no common item".to_string())),
+            [only] => Ok(*only),
+            _ => Err(Fail(format!("too many common items: {:?}", result))),
+        }
+    } else {
+        Err(Fail("there were no sacks at all".to_string()))
+    }
+}
+
+#[test]
+fn test_common_item() {
+    assert_eq!(common_item(&["abc", "ab", "a"]).expect("success"), 'a');
+    assert!(common_item(&["abc", "cde", "a"]).is_err());
+}
+
+fn solve_part2(s: &str) -> usize {
+    let pm = PriMap::new();
+    let mut total: usize = 0;
+    let lines: Vec<&str> = s.split('\n').filter(|line| !line.is_empty()).collect();
+    for chunk in lines.chunks(3) {
+        let common: char = common_item(chunk).expect("should find badge");
+        let pri = pm.lookup(&common).expect("badge is not a letter!");
+        total += pri;
+    }
+    total
+}
+
 fn main() {
     let text = str::from_utf8(include_bytes!("input.txt")).unwrap();
     println!("Day 03 part 1: {}", solve_part1(text));
+    println!("Day 03 part 2: {}", solve_part2(text));
 }
