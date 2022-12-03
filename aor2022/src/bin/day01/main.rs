@@ -12,7 +12,7 @@ fn ordered_calories(text: &str) -> Result<Vec<u64>, Fail> {
                 .map(|s: &str| -> Result<u64, Fail> {
                     s.parse::<u64>().map_err(|e| Fail(e.to_string()))
                 })
-                .fold(Ok(0), sum_result)
+                .try_fold(0, sum_result)
         })
         .collect::<Result<Vec<u64>, Fail>>()?;
     unsorted.sort_by(|a: &u64, b: &u64| b.cmp(a));
