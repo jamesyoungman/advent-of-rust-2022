@@ -25,10 +25,7 @@ impl PriMap {
     }
 
     fn lookup(&self, ch: &char) -> Option<usize> {
-        match self.mapping.get(ch) {
-            Some(n) => Some(*n),
-            None => None,
-        }
+        self.mapping.get(ch).copied()
     }
 }
 
@@ -39,10 +36,8 @@ fn in_both(s: &str) -> Option<char> {
         if (pos + 1) <= halflen {
             // item is in the first half
             in_first_half.insert(ch);
-        } else {
-            if in_first_half.contains(&ch) {
-                return Some(ch);
-            }
+        } else if in_first_half.contains(&ch) {
+            return Some(ch);
         }
     }
     None
