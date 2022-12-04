@@ -11,6 +11,15 @@ impl Assignment {
     fn fully_contains(&self, other: &Assignment) -> bool {
         self.first <= other.first && self.last >= other.last
     }
+    fn partly_contains(&self, other: &Assignment) -> bool {
+        if self.first <= other.first {
+            self.last >= other.first
+        } else if other.first <= self.first {
+            other.last >= self.first
+        } else {
+            false
+        }
+    }
 }
 
 #[test]
@@ -26,6 +35,39 @@ fn test_assignment_fully_contains() {
     assert_eq!(
         false,
         Assignment { first: 1, last: 6 }.fully_contains(&Assignment { first: 3, last: 7 })
+    );
+}
+
+#[test]
+fn test_assignment_partly_contains() {
+    // if fully contains, then also partly contains
+    assert_eq!(
+        true,
+        Assignment { first: 1, last: 6 }.partly_contains(&Assignment { first: 3, last: 4 })
+    );
+    assert_eq!(
+        true,
+        Assignment { first: 1, last: 6 }.partly_contains(&Assignment { first: 3, last: 6 })
+    );
+    assert_eq!(
+        true,
+        Assignment { first: 1, last: 6 }.partly_contains(&Assignment { first: 6, last: 6 })
+    );
+
+    // disjoint
+    assert_eq!(
+        false,
+        Assignment { first: 1, last: 6 }.partly_contains(&Assignment { first: 8, last: 12 })
+    );
+
+    // partial cases
+    assert_eq!(
+        true,
+        Assignment { first: 1, last: 6 }.partly_contains(&Assignment { first: 3, last: 7 })
+    );
+    assert_eq!(
+        true,
+        Assignment { first: 3, last: 6 }.partly_contains(&Assignment { first: 1, last: 4 })
     );
 }
 
@@ -77,6 +119,9 @@ impl PairAssignment {
     fn is_fully_overlapping(&self) -> bool {
         self.first.fully_contains(&self.second) || self.second.fully_contains(&self.first)
     }
+    fn is_partly_overlapping(&self) -> bool {
+        self.first.partly_contains(&self.second) || self.second.partly_contains(&self.first)
+    }
 }
 
 impl TryFrom<&str> for PairAssignment {
@@ -116,7 +161,16 @@ fn solve_part1(text: &str) -> usize {
         .count()
 }
 
+fn solve_part2(text: &str) -> usize {
+    text.split('\n')
+        .filter(|line| !line.is_empty())
+        .map(|line| PairAssignment::try_from(line).expect("line should be valid"))
+        .filter(|pair| pair.is_partly_overlapping())
+        .count()
+}
+
 fn main() {
     let text = str::from_utf8(include_bytes!("input.txt")).unwrap();
     println!("Day 04 part 1: {}", solve_part1(text));
+    println!("Day 04 part 2: {}", solve_part2(text));
 }
