@@ -78,16 +78,18 @@ fn itemset(items: &str) -> HashSet<char> {
 fn common_item(sacks: &[&str]) -> Result<char, Fail> {
     let mut sets: Vec<HashSet<char>> = sacks.iter().map(|sack| itemset(sack)).collect();
     if let Some(acc) = sets.pop() {
-        let result: Vec<char> = sets
+        let common = sets
             .iter()
-            .fold(acc, |acc, sack| acc.intersection(sack).copied().collect())
-            .iter()
-            .copied()
-            .collect();
-        match result.as_slice() {
-            [] => Err(Fail("no common item".to_string())),
-            [only] => Ok(*only),
-            _ => Err(Fail(format!("too many common items: {:?}", result))),
+            .fold(acc, |acc, sack| acc.intersection(sack).copied().collect());
+        let mut it = common.iter();
+        if let Some(first) = it.next() {
+            if let Some(second) = it.next() {
+                Err(Fail(format!("too many common items: {},{}", first, second)))
+            } else {
+                Ok(*first)
+            }
+        } else {
+            Err(Fail("no common item".to_string()))
         }
     } else {
         Err(Fail("there were no sacks at all".to_string()))
