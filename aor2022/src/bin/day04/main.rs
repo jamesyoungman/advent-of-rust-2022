@@ -77,6 +77,11 @@ fn test_assignment_try_from() {
         }
     }
     assert!(Assignment::try_from("3-Q").is_err());
+    assert!(Assignment::try_from("3-8x").is_err());
+    assert!(Assignment::try_from("3-8-").is_err());
+    assert!(Assignment::try_from("3--8").is_err());
+    assert!(Assignment::try_from("8-").is_err());
+    assert!(Assignment::try_from("-8").is_err());
     assert!(Assignment::try_from("i-3").is_err());
     assert!(Assignment::try_from("39").is_err());
     assert!(Assignment::try_from("9-3").is_err());
