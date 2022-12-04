@@ -151,26 +151,26 @@ fn test_pair_assignment_try_from() {
             panic!("expected 3-8,9-12, got {other:?}");
         }
     }
+    assert!(PairAssignment::try_from("3-8").is_err());
 }
 
-fn solve_part1(text: &str) -> usize {
-    text.split('\n')
-        .filter(|line| !line.is_empty())
-        .map(|line| PairAssignment::try_from(line).expect("line should be valid"))
-        .filter(|pair| pair.is_fully_overlapping())
-        .count()
-}
-
-fn solve_part2(text: &str) -> usize {
+fn get_pairs(text: &str) -> Vec<PairAssignment> {
     text.split('\n')
         .filter(|line| !line.is_empty())
         .map(|line| PairAssignment::try_from(line).expect("line should be valid"))
         .filter(|pair| pair.is_partly_overlapping())
-        .count()
+        .collect()
 }
 
 fn main() {
-    let text = str::from_utf8(include_bytes!("input.txt")).unwrap();
-    println!("Day 04 part 1: {}", solve_part1(text));
-    println!("Day 04 part 2: {}", solve_part2(text));
+    let pairs: Vec<PairAssignment> =
+        get_pairs(str::from_utf8(include_bytes!("input.txt")).expect("input should be valid"));
+    println!(
+        "Day 04 part 1: {}",
+        pairs
+            .iter()
+            .filter(|pair| pair.is_fully_overlapping())
+            .count()
+    );
+    println!("Day 04 part 2: {}", pairs.len());
 }
