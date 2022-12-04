@@ -1,47 +1,71 @@
 use lib::error::Fail;
+
+use std::ops::RangeInclusive;
 use std::str;
 
-#[derive(Debug)]
-struct Assignment {
-    first: u32,
-    last: u32,
-}
+/// Assignment is a range of u32 which is never empty.
+#[derive(Debug, Eq, PartialEq)]
+struct Assignment(RangeInclusive<u32>);
 
 impl Assignment {
     fn fully_contains(&self, other: &Assignment) -> bool {
-        self.first <= other.first && self.last >= other.last
+        self.0.contains(other.0.start()) && self.0.contains(other.0.end())
     }
+
     fn partly_contains(&self, other: &Assignment) -> bool {
-        if self.first <= other.first {
-            self.last >= other.first
-        } else if other.first <= self.first {
-            other.last >= self.first
+        self.0.contains(other.0.start()) || self.0.contains(other.0.end())
+    }
+
+    fn new(start: u32, end: u32) -> Result<Assignment, Fail> {
+        let result = start..=end;
+        if result.is_empty() {
+            Err(Fail(format!(
+                "left and right parts of assignment are out of order: {start},{end}"
+            )))
         } else {
-            false
+            Ok(Assignment(result))
         }
     }
 }
 
 #[test]
 fn test_assignment_fully_contains() {
-    assert!(Assignment { first: 1, last: 6 }.fully_contains(&Assignment { first: 3, last: 4 }));
-    assert!(Assignment { first: 1, last: 6 }.fully_contains(&Assignment { first: 3, last: 6 }));
-    assert!(!Assignment { first: 1, last: 6 }.fully_contains(&Assignment { first: 3, last: 7 }));
+    assert!(Assignment::new(1, 6)
+        .unwrap()
+        .fully_contains(&Assignment::new(3, 4).unwrap()));
+    assert!(Assignment::new(1, 6)
+        .unwrap()
+        .fully_contains(&Assignment::new(3, 6).unwrap()));
+    assert!(!Assignment::new(1, 6)
+        .unwrap()
+        .fully_contains(&Assignment::new(3, 7).unwrap()));
 }
 
 #[test]
 fn test_assignment_partly_contains() {
     // if fully contains, then also partly contains
-    assert!(Assignment { first: 1, last: 6 }.partly_contains(&Assignment { first: 3, last: 4 }));
-    assert!(Assignment { first: 1, last: 6 }.partly_contains(&Assignment { first: 3, last: 6 }));
-    assert!(Assignment { first: 1, last: 6 }.partly_contains(&Assignment { first: 6, last: 6 }));
+    assert!(Assignment::new(1, 6)
+        .unwrap()
+        .partly_contains(&Assignment::new(3, 4).unwrap()));
+    assert!(Assignment::new(1, 6)
+        .unwrap()
+        .partly_contains(&Assignment::new(3, 6).unwrap()));
+    assert!(Assignment::new(1, 6)
+        .unwrap()
+        .partly_contains(&Assignment::new(6, 6).unwrap()));
 
     // disjoint
-    assert!(!Assignment { first: 1, last: 6 }.partly_contains(&Assignment { first: 8, last: 12 }));
+    assert!(!Assignment::new(1, 6)
+        .unwrap()
+        .partly_contains(&Assignment::new(8, 12).unwrap()));
 
     // partial cases
-    assert!(Assignment { first: 1, last: 6 }.partly_contains(&Assignment { first: 3, last: 7 }));
-    assert!(Assignment { first: 3, last: 6 }.partly_contains(&Assignment { first: 1, last: 4 }));
+    assert!(Assignment::new(1, 6)
+        .unwrap()
+        .partly_contains(&Assignment::new(3, 7).unwrap()));
+    assert!(Assignment::new(3, 6)
+        .unwrap()
+        .partly_contains(&Assignment::new(1, 4).unwrap()));
 }
 
 impl TryFrom<&str> for Assignment {
@@ -53,15 +77,7 @@ impl TryFrom<&str> for Assignment {
                 (Err(e), _) | (_, Err(e)) => Err(Fail(format!(
                     "left and right parts of assignment should be numbers: {e}"
                 ))),
-                (Ok(first), Ok(last)) => {
-                    if first <= last {
-                        Ok(Assignment { first, last })
-                    } else {
-                        Err(Fail(format!(
-                            "left and right parts of assignment are out of order: {s}"
-                        )))
-                    }
-                }
+                (Ok(first), Ok(last)) => Assignment::new(first, last),
             },
             None => Err(Fail("assignment contains no '-'".to_string())),
         }
@@ -70,12 +86,9 @@ impl TryFrom<&str> for Assignment {
 
 #[test]
 fn test_assignment_try_from() {
-    match Assignment::try_from("3-8").expect("should convert successfully") {
-        Assignment { first: 3, last: 8 } => (),
-        other => {
-            panic!("expected 3-8, got {other:?}");
-        }
-    }
+    let result = Assignment::try_from("3-8").expect("should convert successfully");
+    assert_eq!(result, Assignment::new(3, 8).unwrap());
+
     assert!(Assignment::try_from("3-Q").is_err());
     assert!(Assignment::try_from("3-8x").is_err());
     assert!(Assignment::try_from("3-8-").is_err());
@@ -87,7 +100,7 @@ fn test_assignment_try_from() {
     assert!(Assignment::try_from("9-3").is_err());
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 struct PairAssignment {
     first: Assignment,
     second: Assignment,
@@ -120,15 +133,14 @@ impl TryFrom<&str> for PairAssignment {
 
 #[test]
 fn test_pair_assignment_try_from() {
-    match PairAssignment::try_from("3-8,9-12").expect("should convert successfully") {
+    let result = PairAssignment::try_from("3-8,9-12").expect("should convert successfully");
+    assert_eq!(
+        result,
         PairAssignment {
-            first: Assignment { first: 3, last: 8 },
-            second: Assignment { first: 9, last: 12 },
-        } => (),
-        other => {
-            panic!("expected 3-8,9-12, got {other:?}");
+            first: Assignment::new(3, 8).unwrap(),
+            second: Assignment::new(9, 12).unwrap(),
         }
-    }
+    );
     assert!(PairAssignment::try_from("3-8").is_err());
 }
 
