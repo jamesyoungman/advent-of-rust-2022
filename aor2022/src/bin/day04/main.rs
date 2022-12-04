@@ -24,51 +24,24 @@ impl Assignment {
 
 #[test]
 fn test_assignment_fully_contains() {
-    assert_eq!(
-        true,
-        Assignment { first: 1, last: 6 }.fully_contains(&Assignment { first: 3, last: 4 })
-    );
-    assert_eq!(
-        true,
-        Assignment { first: 1, last: 6 }.fully_contains(&Assignment { first: 3, last: 6 })
-    );
-    assert_eq!(
-        false,
-        Assignment { first: 1, last: 6 }.fully_contains(&Assignment { first: 3, last: 7 })
-    );
+    assert!(Assignment { first: 1, last: 6 }.fully_contains(&Assignment { first: 3, last: 4 }));
+    assert!(Assignment { first: 1, last: 6 }.fully_contains(&Assignment { first: 3, last: 6 }));
+    assert!(!Assignment { first: 1, last: 6 }.fully_contains(&Assignment { first: 3, last: 7 }));
 }
 
 #[test]
 fn test_assignment_partly_contains() {
     // if fully contains, then also partly contains
-    assert_eq!(
-        true,
-        Assignment { first: 1, last: 6 }.partly_contains(&Assignment { first: 3, last: 4 })
-    );
-    assert_eq!(
-        true,
-        Assignment { first: 1, last: 6 }.partly_contains(&Assignment { first: 3, last: 6 })
-    );
-    assert_eq!(
-        true,
-        Assignment { first: 1, last: 6 }.partly_contains(&Assignment { first: 6, last: 6 })
-    );
+    assert!(Assignment { first: 1, last: 6 }.partly_contains(&Assignment { first: 3, last: 4 }));
+    assert!(Assignment { first: 1, last: 6 }.partly_contains(&Assignment { first: 3, last: 6 }));
+    assert!(Assignment { first: 1, last: 6 }.partly_contains(&Assignment { first: 6, last: 6 }));
 
     // disjoint
-    assert_eq!(
-        false,
-        Assignment { first: 1, last: 6 }.partly_contains(&Assignment { first: 8, last: 12 })
-    );
+    assert!(!Assignment { first: 1, last: 6 }.partly_contains(&Assignment { first: 8, last: 12 }));
 
     // partial cases
-    assert_eq!(
-        true,
-        Assignment { first: 1, last: 6 }.partly_contains(&Assignment { first: 3, last: 7 })
-    );
-    assert_eq!(
-        true,
-        Assignment { first: 3, last: 6 }.partly_contains(&Assignment { first: 1, last: 4 })
-    );
+    assert!(Assignment { first: 1, last: 6 }.partly_contains(&Assignment { first: 3, last: 7 }));
+    assert!(Assignment { first: 3, last: 6 }.partly_contains(&Assignment { first: 1, last: 4 }));
 }
 
 impl TryFrom<&str> for Assignment {
