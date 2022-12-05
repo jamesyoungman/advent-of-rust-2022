@@ -79,7 +79,7 @@ fn parse_moves(text: &str) -> Result<Vec<Move>, Fail> {
 // [S] [J] [S] [T] [T] [M] [D] [B] [H]
 //  1   2   3   4   5   6   7   8   9
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct State {
     stacks: Vec<Vec<char>>,
 }
@@ -107,14 +107,14 @@ impl State {
             .collect()
     }
 
-    fn apply_move_sequence(&mut self, moves: &[Move]) -> Result<(), Fail> {
+    fn apply_move_sequence(&mut self, moves: &[Move], crane_model: u32) -> Result<(), Fail> {
         for this_move in moves.iter() {
-            self.apply_move(this_move)?;
+            self.apply_move(this_move, crane_model)?;
         }
         Ok(())
     }
 
-    fn apply_move(&mut self, m: &Move) -> Result<(), Fail> {
+    fn apply_move(&mut self, m: &Move, crane_model: u32) -> Result<(), Fail> {
         let items = match self.stacks.get_mut(m.from - 1) {
             Some(mut source) => take_several_items(&mut source, m.count)?,
             None => {
@@ -126,7 +126,17 @@ impl State {
         };
         match self.stacks.get_mut(m.to - 1) {
             Some(dest) => {
-                dest.extend(items);
+                match crane_model {
+                    9000 => {
+                        dest.extend(items);
+                    }
+                    9001 => {
+                        dest.extend(items.iter().rev().copied());
+                    }
+                    _ => {
+                        return Err(Fail(format!("unknown crane model {crane_model}")));
+                    }
+                }
                 Ok(())
             }
             None => {
@@ -211,10 +221,16 @@ fn parse_input(input: &str) -> Result<(State, Vec<Move>), Fail> {
 }
 
 fn main() {
-    let (mut state, moves) =
+    let (mut part1_state, moves) =
         parse_input(str::from_utf8(include_bytes!("input.txt")).expect("valid encoding"))
             .expect("valid input file");
-    eprintln!("{}", &state);
-    state.apply_move_sequence(&moves).expect("valid moves");
-    println!("Day 05 part 1: {}", state.top_crates());
+    let mut part2_state = part1_state.clone();
+    part1_state
+        .apply_move_sequence(&moves, 9000)
+        .expect("valid moves");
+    println!("Day 05 part 1: {}", part1_state.top_crates());
+    part2_state
+        .apply_move_sequence(&moves, 9001)
+        .expect("valid moves");
+    println!("Day 05 part 2: {}", part2_state.top_crates());
 }
