@@ -9,6 +9,12 @@ struct MoveParser {
     rx: Regex,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum Crane {
+    Model9000,
+    Model9001,
+}
+
 const MOVE_REGEX: &str = r"^move (\d+) from (\d+) to (\d+)$";
 
 impl MoveParser {
@@ -33,11 +39,15 @@ impl MoveParser {
             Some(captures) => match (captures.get(1), captures.get(2), captures.get(3)) {
                 (Some(count), Some(from), Some(to)) => {
                     match (
-                        count.as_str().parse(),
-                        from.as_str().parse(),
-                        to.as_str().parse(),
+                        count.as_str().parse::<usize>(),
+                        from.as_str().parse::<usize>(),
+                        to.as_str().parse::<usize>(),
                     ) {
-                        (Ok(count), Ok(from), Ok(to)) => Ok(Move { count, from, to }),
+                        (Ok(count), Ok(from), Ok(to)) => Ok(Move {
+                            count,
+                            from: from - 1,
+                            to: to - 1,
+                        }),
                         (Err(e), _, _) | (_, Err(e), _) | (_, _, Err(e)) => {
                             Err(Fail(e.to_string()))
                         }
@@ -55,9 +65,9 @@ fn test_parse() {
     assert_eq!(
         p.parse("move 1 from 2 to 3").expect("valid move"),
         Move {
-            id: 1,
-            from: 2,
-            to: 3
+            count: 1,
+            from: 1,
+            to: 2
         }
     );
 }
@@ -69,34 +79,9 @@ fn parse_moves(text: &str) -> Result<Vec<Move>, Fail> {
         .collect()
 }
 
-//                 [B] [L]     [J]
-//             [B] [Q] [R]     [D] [T]
-//             [G] [H] [H] [M] [N] [F]
-//         [J] [N] [D] [F] [J] [H] [B]
-//     [Q] [F] [W] [S] [V] [N] [F] [N]
-// [W] [N] [H] [M] [L] [B] [R] [T] [Q]
-// [L] [T] [C] [R] [R] [J] [W] [Z] [L]
-// [S] [J] [S] [T] [T] [M] [D] [B] [H]
-//  1   2   3   4   5   6   7   8   9
-
 #[derive(Debug, Clone)]
 struct State {
     stacks: Vec<Vec<char>>,
-}
-
-fn take_several_items(v: &mut Vec<char>, n: usize) -> Result<Vec<char>, Fail> {
-    let mut result: Vec<char> = Vec::with_capacity(n);
-    while result.len() < n {
-        match v.pop() {
-            Some(ch) => {
-                result.push(ch);
-            }
-            None => {
-                return Err(Fail("source stack is too short".to_string()));
-            }
-        }
-    }
-    Ok(result)
 }
 
 impl State {
@@ -107,42 +92,17 @@ impl State {
             .collect()
     }
 
-    fn apply_move_sequence(&mut self, moves: &[Move], crane_model: u32) -> Result<(), Fail> {
-        for this_move in moves.iter() {
-            self.apply_move(this_move, crane_model)?;
-        }
-        Ok(())
-    }
-
-    fn apply_move(&mut self, m: &Move, crane_model: u32) -> Result<(), Fail> {
-        let items = match self.stacks.get_mut(m.from - 1) {
-            Some(source) => take_several_items(source, m.count)?,
-            None => {
-                return Err(Fail(format!(
-                    "source stack {} does not exist in {:?}",
-                    m.from, &self
-                )));
-            }
-        };
-        match self.stacks.get_mut(m.to - 1) {
-            Some(dest) => {
-                match crane_model {
-                    9000 => {
-                        dest.extend(items);
-                    }
-                    9001 => {
-                        dest.extend(items.iter().rev().copied());
-                    }
-                    _ => {
-                        return Err(Fail(format!("unknown crane model {crane_model}")));
-                    }
+    fn apply_move_sequence(&mut self, moves: &[Move], crane_model: Crane) {
+        for m in moves.iter() {
+            let unmoved = self.stacks[m.from].len() - m.count;
+            let mut items = self.stacks[m.from].split_off(unmoved);
+            match crane_model {
+                Crane::Model9000 => {
+                    items.reverse();
                 }
-                Ok(())
+                Crane::Model9001 => (),
             }
-            None => Err(Fail(format!(
-                "dest stack {} does not exist in {:?}",
-                m.to, &self
-            ))),
+            self.stacks[m.to].extend(items);
         }
     }
 }
@@ -223,12 +183,8 @@ fn main() {
         parse_input(str::from_utf8(include_bytes!("input.txt")).expect("valid encoding"))
             .expect("valid input file");
     let mut part2_state = part1_state.clone();
-    part1_state
-        .apply_move_sequence(&moves, 9000)
-        .expect("valid moves");
+    part1_state.apply_move_sequence(&moves, Crane::Model9000);
     println!("Day 05 part 1: {}", part1_state.top_crates());
-    part2_state
-        .apply_move_sequence(&moves, 9001)
-        .expect("valid moves");
+    part2_state.apply_move_sequence(&moves, Crane::Model9001);
     println!("Day 05 part 2: {}", part2_state.top_crates());
 }
