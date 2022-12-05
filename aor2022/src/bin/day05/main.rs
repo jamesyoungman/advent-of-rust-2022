@@ -116,7 +116,7 @@ impl State {
 
     fn apply_move(&mut self, m: &Move, crane_model: u32) -> Result<(), Fail> {
         let items = match self.stacks.get_mut(m.from - 1) {
-            Some(mut source) => take_several_items(&mut source, m.count)?,
+            Some(source) => take_several_items(source, m.count)?,
             None => {
                 return Err(Fail(format!(
                     "source stack {} does not exist in {:?}",
@@ -139,12 +139,10 @@ impl State {
                 }
                 Ok(())
             }
-            None => {
-                return Err(Fail(format!(
-                    "dest stack {} does not exist in {:?}",
-                    m.to, &self
-                )));
-            }
+            None => Err(Fail(format!(
+                "dest stack {} does not exist in {:?}",
+                m.to, &self
+            ))),
         }
     }
 }
@@ -173,7 +171,7 @@ fn parse_initial_state(state: &str) -> Result<State, Fail> {
         let chars: Vec<char> = line.chars().collect();
         for (column, chunk) in chars.chunks(4).enumerate() {
             if stacks.len() <= column {
-                stacks.resize_with(column + 1, || vec![]);
+                stacks.resize_with(column + 1, Vec::new);
             }
             match chunk {
                 &[' ', ' ', ' ', ' '] | &[' ', ' ', ' '] => (),
