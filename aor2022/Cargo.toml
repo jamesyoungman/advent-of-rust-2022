@@ -11,9 +11,9 @@ clap = "3"
 #ndarray = "0.15"		# day 09, 19
 #nom = "7"			# day 17
 #pathfinding = "3.0.5"           # day 15
-#regex = "1"			# day 18, 19
 #tracing = "0.1"                 # day 17
 #tracing-subscriber = "0.2"	# day 17
+regex = "1"
 
 [profile.release]
 debug = 1
@@ -31,3 +31,5 @@ name = "day02"
 name = "day03"
 [[bin]]
 name = "day04"
+[[bin]]
+name = "day05"
