@@ -2,26 +2,14 @@ use std::fmt;
 use std::str;
 
 use regex::Regex;
+use sscanf::scanf;
 
 use lib::error::Fail;
-
-struct MoveParser {
-    rx: Regex,
-}
 
 #[derive(Debug, Clone, Copy)]
 enum Crane {
     Model9000,
     Model9001,
-}
-
-const MOVE_REGEX: &str = r"^move (\d+) from (\d+) to (\d+)$";
-
-impl MoveParser {
-    fn new() -> Result<MoveParser, Fail> {
-        let rx = Regex::new(MOVE_REGEX).map_err(|e| Fail(e.to_string()))?;
-        Ok(MoveParser { rx })
-    }
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -31,52 +19,32 @@ struct Move {
     to: usize,
 }
 
-impl MoveParser {
-    fn parse(&self, instruction: &str) -> Result<Move, Fail> {
-        let invalid = |why: &str| Fail(format!("invalid move {instruction}: {why}"));
-        match self.rx.captures(instruction) {
-            None => Err(invalid("does not match regex")),
-            Some(captures) => match (captures.get(1), captures.get(2), captures.get(3)) {
-                (Some(count), Some(from), Some(to)) => {
-                    match (
-                        count.as_str().parse::<usize>(),
-                        from.as_str().parse::<usize>(),
-                        to.as_str().parse::<usize>(),
-                    ) {
-                        (Ok(count), Ok(from), Ok(to)) => Ok(Move {
-                            count,
-                            from: from - 1,
-                            to: to - 1,
-                        }),
-                        (Err(e), _, _) | (_, Err(e), _) | (_, _, Err(e)) => {
-                            Err(Fail(e.to_string()))
-                        }
-                    }
-                }
-                _ => Err(invalid("not enough fields matched")),
-            },
-        }
+fn parse_move(instruction: &str) -> Result<Move, Fail> {
+    if let Some((count, from, to)) =
+        scanf!(instruction, "move {} from {} to {}", usize, usize, usize)
+    {
+        Ok(Move {
+            count,
+            from: from - 1,
+            to: to - 1,
+        })
+    } else {
+        Err(Fail(format!(
+            "invalid move {instruction}: not enough fields matched"
+        )))
     }
 }
 
 #[test]
 fn test_parse() {
-    let p = MoveParser::new().unwrap();
     assert_eq!(
-        p.parse("move 1 from 2 to 3").expect("valid move"),
+        parse_move("move 1 from 2 to 3").expect("valid move"),
         Move {
             count: 1,
             from: 1,
             to: 2
         }
     );
-}
-
-fn parse_moves(text: &str) -> Result<Vec<Move>, Fail> {
-    let parser = MoveParser::new()?;
-    text.split_terminator('\n')
-        .map(|line| parser.parse(line))
-        .collect()
 }
 
 #[derive(Debug, Clone)]
@@ -169,11 +137,13 @@ fn test_parse_initial_state() {
 
 fn parse_input(input: &str) -> Result<(State, Vec<Move>), Fail> {
     match input.split_once("\n\n") {
-        Some((state, moves)) => {
-            let state = parse_initial_state(state)?;
-            let moves = parse_moves(moves)?;
-            Ok((state, moves))
-        }
+        Some((state, moves)) => Ok((
+            parse_initial_state(state)?,
+            moves
+                .split_terminator('\n')
+                .map(parse_move)
+                .collect::<Result<Vec<_>, _>>()?,
+        )),
         None => Err(Fail("there should be a blank line".to_string())),
     }
 }
