@@ -21,7 +21,7 @@ struct Move {
 
 fn parse_move(instruction: &str) -> Result<Move, Fail> {
     if let Some((count, from, to)) =
-        scanf!(instruction, "move {} from {} to {}", usize, usize, usize)
+        scanf!(instruction, "move {usize} from {usize} to {usize}").ok()
     {
         Ok(Move {
             count,
