@@ -35,10 +35,9 @@ fn charge_size_to_parent(
                 .entry(parent_id)
                 .and_modify(|size| {
                     *size += len;
-                    dbg!(size);
                 })
                 .or_insert(len);
-            charge_size_to_parent(fs, total_by_node, &parent_node, len);
+            charge_size_to_parent(fs, total_by_node, parent_node, len);
         }
     }
 }
@@ -93,13 +92,8 @@ impl FileSystem {
             .iter()
             .filter_map(|(_node_id, node)| node.filesize.map(|size| (node, size)))
             .for_each(|(node, size)| {
-                println!(
-                    "charging size of {} (which is {}) to its parents",
-                    node.name, size
-                );
-                charge_size_to_parent(self, &mut total_by_node, &node, size);
+                charge_size_to_parent(self, &mut total_by_node, node, size);
             });
-        dbg!(&total_by_node);
         Ok(total_by_node)
     }
 
@@ -111,7 +105,7 @@ impl FileSystem {
     }
 
     fn find_parent_of(&self, node_id: &NodeId) -> Option<NodeId> {
-        self.nodes.get(node_id).map(|node| node.parent).flatten()
+        self.nodes.get(node_id).and_then(|node| node.parent)
     }
 }
 
@@ -143,10 +137,12 @@ fn parse_commands(s: &str) -> Result<FileSystem, Fail> {
                                         cwd = Some(*child_id);
                                     }
                                     None => {
-                                        eprintln!(
-					"the user did cd {} (with cwd {:?}) without having seen {} in ls output!",
-					dirname, cwd, dirname
-				    );
+                                        if dirname != "/" {
+                                            eprintln!(
+						"the user did cd {} (with cwd {:?}) without having seen {} in ls output!",
+						dirname, cwd, dirname
+					    );
+                                        }
                                         cwd = Some(fs.add_dir(cwd, dirname));
                                     }
                                 }
@@ -160,12 +156,10 @@ fn parse_commands(s: &str) -> Result<FileSystem, Fail> {
             }
             None => match scanf!(command_or_output, "dir {}", str) {
                 Ok(dirname) => {
-                    println!("saw dir {} (parent {:?}) in ls output", dirname, cwd);
                     fs.add_dir(cwd, dirname);
                 }
                 Err(_) => match scanf!(command_or_output, "{usize:r10} {str}") {
                     Ok((file_len, filename)) => {
-                        println!("saw file {} in ls output", filename);
                         fs.add_file(cwd, filename, file_len);
                     }
                     Err(_) => {
@@ -175,28 +169,16 @@ fn parse_commands(s: &str) -> Result<FileSystem, Fail> {
             },
         }
     }
-    dbg!(&fs);
     Ok(fs)
 }
 
 fn solve_part1(text: &str) -> Result<usize, Fail> {
     let fs = parse_commands(text)?;
     let transitive_sizes = fs.transitive_sizes_per_directory()?;
-    dbg!(&transitive_sizes);
     Ok(transitive_sizes
         .iter()
-        .filter(|(node_id, size)| {
-            match fs.nodes.get(node_id) {
-                Some(node) => {
-                    println!("size of {} is {}", node.name, size);
-                }
-                None => {
-                    println!("size of {} is {}", node_id.0, size);
-                }
-            }
-            **size <= 100_000
-        })
-        .map(|(_node, size)| size)
+        .filter(|(_node_id, size)| **size <= 100_000)
+        .map(|(_node_id, size)| size)
         .sum())
 }
 
@@ -235,26 +217,32 @@ fn test_part1_example() {
 fn solve_part2(text: &str) -> Result<usize, Fail> {
     let fs = parse_commands(text)?;
     let transitive_sizes = fs.transitive_sizes_per_directory()?;
-    let total_space = 70000000;
-    let space_needed = 30000000;
-    match fs.root() {
+    const TOTAL_SPACE: usize = 70000000;
+    const SPACE_NEEDED: usize = 30000000;
+    let space_used = match fs.root() {
         None => Err(Fail("no filesystem root".to_string())),
         Some(root_node_id) => match transitive_sizes.get(&root_node_id) {
             None => Err(Fail("no total usage for root".to_string())),
-            Some(space_used) => {
-                let space_free = total_space - space_used;
-                let to_free = space_needed - space_free;
-                let mut options: Vec<usize> = transitive_sizes
-                    .into_iter()
-                    .filter_map(|(_node_id, size)| if size > to_free { Some(size) } else { None })
-                    .collect();
-                options.sort();
-                match options.iter().next() {
-                    Some(n) => Ok(*n),
-                    None => Err(Fail("no deletion options identified".to_string())),
-                }
-            }
+            Some(space_used) => Ok(*space_used),
         },
+    }?;
+    let space_free = TOTAL_SPACE - space_used;
+    let to_free = SPACE_NEEDED - space_free;
+    match transitive_sizes
+        .into_iter()
+        .filter_map(
+            |(_node_id, size)| {
+                if size > to_free {
+                    Some(size)
+                } else {
+                    None
+                }
+            },
+        )
+        .min()
+    {
+        Some(n) => Ok(n),
+        None => Err(Fail("no deletion options identified".to_string())),
     }
 }
 
