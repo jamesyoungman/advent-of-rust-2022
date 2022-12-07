@@ -8,7 +8,6 @@ fn all_differ(chars: &[char]) -> bool {
             return false; // duplicate
         }
     }
-    dbg!(&chars);
     true
 }
 
@@ -47,10 +46,11 @@ fn detect_som(s: &str) -> Option<usize> {
 
 #[test]
 fn test_detect_som() {
-    assert_eq!(detect_som("bvwbjplbgvbhsrlpgdmjqwftvncz").unwrap(), 19);
+    assert_eq!(detect_som("mjqjpqmgbljsphdztnvjfqwrcgsmlb").unwrap(), 19);
+    assert_eq!(detect_som("bvwbjplbgvbhsrlpgdmjqwftvncz").unwrap(), 23);
     assert_eq!(detect_som("nppdvjthqldpwncqszvftbrmjlhg").unwrap(), 23);
-    assert_eq!(detect_som("nznrnfrfntjfmvfwmzdfjlvtqnbhcprsg").unwrap(), 23);
-    assert_eq!(detect_som("zcfzfwzzqfrljwzlrfnpqdbhtmscgvjw").unwrap(), 29);
+    assert_eq!(detect_som("nznrnfrfntjfmvfwmzdfjlvtqnbhcprsg").unwrap(), 29);
+    assert_eq!(detect_som("zcfzfwzzqfrljwzlrfnpqdbhtmscgvjw").unwrap(), 26);
 }
 
 fn main() {
