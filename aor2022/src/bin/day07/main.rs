@@ -52,6 +52,10 @@ impl FileSystem {
         }
     }
 
+    fn root(&self) -> Option<NodeId> {
+        self.root
+    }
+
     fn assign_next_id(&mut self) -> NodeId {
         let result = self.next_id;
         self.next_id = NodeId(self.next_id.0 + 1);
@@ -196,34 +200,70 @@ fn solve_part1(text: &str) -> Result<usize, Fail> {
         .sum())
 }
 
+#[cfg(test)]
+const EXAMPLE: &str = concat!(
+    "$ cd /\n",
+    "$ ls\n",
+    "dir a\n",
+    "14848514 b.txt\n",
+    "8504156 c.dat\n",
+    "dir d\n",
+    "$ cd a\n",
+    "$ ls\n",
+    "dir e\n",
+    "29116 f\n",
+    "2557 g\n",
+    "62596 h.lst\n",
+    "$ cd e\n",
+    "$ ls\n",
+    "584 i\n",
+    "$ cd ..\n",
+    "$ cd ..\n",
+    "$ cd d\n",
+    "$ ls\n",
+    "4060174 j\n",
+    "8033020 d.log\n",
+    "5626152 d.ext\n",
+    "7214296 k\n",
+);
+
 #[test]
 fn test_part1_example() {
-    const EXAMPLE: &str = concat!(
-        "$ cd /\n",
-        "$ ls\n",
-        "dir a\n",
-        "14848514 b.txt\n",
-        "8504156 c.dat\n",
-        "dir d\n",
-        "$ cd a\n",
-        "$ ls\n",
-        "dir e\n",
-        "29116 f\n",
-        "2557 g\n",
-        "62596 h.lst\n",
-        "$ cd e\n",
-        "$ ls\n",
-        "584 i\n",
-        "$ cd ..\n",
-        "$ cd ..\n",
-        "$ cd d\n",
-        "$ ls\n",
-        "4060174 j\n",
-        "8033020 d.log\n",
-        "5626152 d.ext\n",
-        "7214296 k\n",
-    );
     assert_eq!(solve_part1(EXAMPLE).expect("example should succeed"), 95437);
+}
+
+fn solve_part2(text: &str) -> Result<usize, Fail> {
+    let fs = parse_commands(text)?;
+    let transitive_sizes = fs.transitive_sizes_per_directory()?;
+    let total_space = 70000000;
+    let space_needed = 30000000;
+    match fs.root() {
+        None => Err(Fail("no filesystem root".to_string())),
+        Some(root_node_id) => match transitive_sizes.get(&root_node_id) {
+            None => Err(Fail("no total usage for root".to_string())),
+            Some(space_used) => {
+                let space_free = total_space - space_used;
+                let to_free = space_needed - space_free;
+                let mut options: Vec<usize> = transitive_sizes
+                    .into_iter()
+                    .filter_map(|(_node_id, size)| if size > to_free { Some(size) } else { None })
+                    .collect();
+                options.sort();
+                match options.iter().next() {
+                    Some(n) => Ok(*n),
+                    None => Err(Fail("no deletion options identified".to_string())),
+                }
+            }
+        },
+    }
+}
+
+#[test]
+fn test_part2_example() {
+    assert_eq!(
+        solve_part2(EXAMPLE).expect("example should succeed"),
+        24933642
+    );
 }
 
 fn main() {
@@ -231,5 +271,9 @@ fn main() {
     println!(
         "Day 07 part 1: {}",
         solve_part1(text).expect("should not fail")
+    );
+    println!(
+        "Day 07 part 2: {}",
+        solve_part2(text).expect("should not fail")
     );
 }
