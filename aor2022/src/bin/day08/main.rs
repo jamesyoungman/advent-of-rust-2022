@@ -3,6 +3,8 @@ use std::str;
 use lib::error::Fail;
 use lib::grid::{CompassDirection, Position, ALL_MOVE_OPTIONS};
 
+use itertools::Itertools;
+
 struct Trees {
     heights: Vec<Vec<i8>>,
     width: i64,
@@ -63,9 +65,6 @@ impl Trees {
 
     fn highest(&self, mut pos: Position, direction: &CompassDirection, count: usize) -> i8 {
         let mut highest = -1;
-        //dbg!(&pos);
-        //dbg!(direction);
-        //dbg!(&count);
         for _ in 0..count {
             let this_tree_height = self.get(&pos);
             if this_tree_height > highest {
@@ -106,6 +105,33 @@ impl Trees {
             .iter()
             .any(|direction| self.is_visible_from_direction(pos, &direction))
     }
+
+    fn viewing_distance(&self, mut pos: Position, dir: &CompassDirection) -> usize {
+        //dbg!(&pos);
+        //dbg!(&dir);
+        let h = self.get(&pos);
+        for n in 0.. {
+            let newpos = pos.move_direction(dir);
+            if newpos.x == self.width() || newpos.x < 0 || newpos.y == self.height() || newpos.y < 0
+            {
+                //println!("viewing_distance: {newpos} is off grid, result is {n}");
+                return n;
+            }
+            let next_ht = self.get(&newpos);
+            //println!("viewing_distance: n={n}, newpos={newpos} h={h}, next_ht={next_ht}");
+            if next_ht >= h {
+                return n + 1;
+            }
+            pos = newpos;
+        }
+        unreachable!("open range iterator finished")
+    }
+
+    fn scenic_score(&self, pos: &Position) -> usize {
+        ALL_MOVE_OPTIONS.iter().fold(1, |acc, direction| {
+            acc * self.viewing_distance(*pos, direction)
+        })
+    }
 }
 
 fn count_visible_trees(s: &str) -> usize {
@@ -121,13 +147,50 @@ fn count_visible_trees(s: &str) -> usize {
     count
 }
 
+fn highest_scenic_score(s: &str) -> usize {
+    let trees = Trees::try_from(s).expect("input should be valid");
+    (0..(trees.width()))
+        .cartesian_product(0..trees.height())
+        .map(|(x, y)| trees.scenic_score(&Position { x, y }))
+        .max()
+        .expect("number of trees should be nonzero")
+}
+
 #[test]
 fn test_count_visible_trees() {
     const EXAMPLE: &str = concat!("30373\n", "25512\n", "65332\n", "33549\n", "35390\n",);
     assert_eq!(count_visible_trees(EXAMPLE), 21);
 }
 
+#[test]
+fn test_viewing_distance() {
+    const EXAMPLE: &str = concat!("30373\n", "25512\n", "65332\n", "33549\n", "35390\n",);
+    let trees = Trees::try_from(EXAMPLE).expect("input should be valid");
+
+    // Looking in each direction from the 5 in the second row.
+    let p = Position { x: 2, y: 1 };
+    assert_eq!(trees.viewing_distance(p, &CompassDirection::North), 1);
+    assert_eq!(trees.viewing_distance(p, &CompassDirection::West), 1);
+    assert_eq!(trees.viewing_distance(p, &CompassDirection::East), 2);
+    assert_eq!(trees.viewing_distance(p, &CompassDirection::South), 2);
+}
+
+#[test]
+fn test_scenic_score() {
+    const EXAMPLE: &str = concat!("30373\n", "25512\n", "65332\n", "33549\n", "35390\n",);
+    let trees = Trees::try_from(EXAMPLE).expect("input should be valid");
+    assert_eq!(trees.scenic_score(&Position { x: 2, y: 1 }), 4);
+    assert_eq!(trees.scenic_score(&Position { x: 2, y: 3 }), 8);
+}
+
+#[test]
+fn test_highest_scenic_score() {
+    const EXAMPLE: &str = concat!("30373\n", "25512\n", "65332\n", "33549\n", "35390\n",);
+    assert_eq!(highest_scenic_score(EXAMPLE), 8);
+}
+
 fn main() {
     let text = str::from_utf8(include_bytes!("input.txt")).expect("valid input file");
     println!("Day 08 part 1: {}", count_visible_trees(text));
+    println!("Day 08 part 2: {}", highest_scenic_score(text));
 }
