@@ -97,13 +97,13 @@ impl Trees {
         //dbg!(pos);
         //dbg!(fromdir);
         //dbg!(start);
-        self.highest(start, &fromdir.reversed(), count) < self.get(&pos)
+        self.highest(start, &fromdir.reversed(), count) < self.get(pos)
     }
 
     fn is_visible_from_edge(&self, pos: &Position) -> bool {
         ALL_MOVE_OPTIONS
             .iter()
-            .any(|direction| self.is_visible_from_direction(pos, &direction))
+            .any(|direction| self.is_visible_from_direction(pos, direction))
     }
 
     fn viewing_distance(&self, mut pos: Position, dir: &CompassDirection) -> usize {
