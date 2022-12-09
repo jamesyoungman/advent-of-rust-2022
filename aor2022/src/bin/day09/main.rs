@@ -5,9 +5,6 @@ use std::str;
 use lib::error::Fail;
 use lib::grid::{CompassDirection, Position};
 
-const MAX_H_GAP: i64 = 1;
-const MAX_V_GAP: i64 = 1;
-
 #[derive(Debug, Clone)]
 struct Rope {
     knots: Vec<Position>,
@@ -16,15 +13,7 @@ struct Rope {
 fn close_enough(head_pos: &Position, tail_pos: &Position) -> bool {
     let hgap = head_pos.x - tail_pos.x;
     let vgap = head_pos.y - tail_pos.y;
-    if hgap.abs() <= MAX_H_GAP {
-        if vgap.abs() <= MAX_V_GAP {
-            true
-        } else {
-            false
-        }
-    } else {
-        false
-    }
+    hgap.abs() <= 1 && vgap.abs() <= 1
 }
 
 fn maybe_move_tail(head_pos: Position, tail_pos: Position) -> Position {
@@ -117,24 +106,21 @@ impl TryFrom<&str> for Move {
     }
 }
 
-fn perform_sequence<I: IntoIterator<Item = Move>>(start: Rope, moves: I) -> Vec<Rope> {
+fn perform_sequence<'a, I: IntoIterator<Item = &'a Move>>(start: Rope, moves: I) -> Vec<Rope> {
     struct State {
         current: Rope,
         history: Vec<Rope>,
     }
-    fn update(now: State, thismove: Move) -> State {
-        match now {
-            State {
-                mut current,
-                mut history,
-            } => {
-                for _ in 0..thismove.count {
-                    current.perform_move(thismove.direction);
-                    history.push(current.clone());
-                }
-                State { current, history }
-            }
+    fn update(now: State, thismove: &Move) -> State {
+        let State {
+            mut current,
+            mut history,
+        } = now;
+        for _ in 0..thismove.count {
+            current.perform_move(thismove.direction);
+            history.push(current.clone());
         }
+        State { current, history }
     }
     moves
         .into_iter()
@@ -152,22 +138,21 @@ fn parse_moves(s: &str) -> Result<Vec<Move>, Fail> {
     s.split_terminator('\n').map(Move::try_from).collect()
 }
 
-fn count_unique_tail_positions(moves: Vec<Move>, len: usize) -> usize {
+fn count_unique_tail_positions(moves: &[Move], len: usize) -> usize {
     let history = perform_sequence(Rope::new(len), moves);
     let positions: HashSet<Position> = history
         .into_iter()
-        .map(|mut rope| rope.knots.pop())
-        .flatten()
+        .filter_map(|mut rope| rope.knots.pop())
         .collect();
     positions.len()
 }
 
-fn solve_part1(s: &str) -> Result<usize, Fail> {
-    Ok(count_unique_tail_positions(parse_moves(s)?, 2))
+fn solve_part1(moves: &[Move]) -> usize {
+    count_unique_tail_positions(moves, 2)
 }
 
-fn solve_part2(s: &str) -> Result<usize, Fail> {
-    Ok(count_unique_tail_positions(parse_moves(s)?, 10))
+fn solve_part2(moves: &[Move]) -> usize {
+    count_unique_tail_positions(moves, 10)
 }
 
 #[test]
@@ -180,12 +165,7 @@ fn test_count_unique_tail_positions() {
 
 fn main() {
     let text = str::from_utf8(include_bytes!("input.txt")).expect("valid input file");
-    println!(
-        "Day 09 part 1: {}",
-        solve_part1(text).expect("should be able to solve part 1")
-    );
-    println!(
-        "Day 09 part 1: {}",
-        solve_part2(text).expect("should be able to solve part 2")
-    );
+    let moves: Vec<Move> = parse_moves(text).expect("valid moves");
+    println!("Day 09 part 1: {}", solve_part1(&moves));
+    println!("Day 09 part 2: {}", solve_part2(&moves));
 }
