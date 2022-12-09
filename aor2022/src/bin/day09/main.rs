@@ -16,8 +16,8 @@ fn close_enough(head_pos: &Position, tail_pos: &Position) -> bool {
     hgap.abs() <= 1 && vgap.abs() <= 1
 }
 
-fn maybe_move_tail(head_pos: Position, tail_pos: Position) -> Position {
-    if close_enough(&head_pos, &tail_pos) {
+fn maybe_move_tail(head_pos: &Position, tail_pos: Position) -> Position {
+    if close_enough(head_pos, &tail_pos) {
         tail_pos
     } else {
         let result = Position {
@@ -25,13 +25,9 @@ fn maybe_move_tail(head_pos: Position, tail_pos: Position) -> Position {
             y: tail_pos.y + (head_pos.y - tail_pos.y).signum(),
         };
         // we want to re-establish this invariant
-        assert!(close_enough(&head_pos, &result));
+        assert!(close_enough(head_pos, &result));
         result
     }
-}
-
-fn update_knot_position(head: &Position, tail: &mut Position) {
-    *tail = maybe_move_tail(*head, *tail);
 }
 
 fn visit_pairs<T>(v: &mut [T], mut f: impl FnMut(&T, &mut T)) {
@@ -51,6 +47,10 @@ impl Rope {
         }
     }
 
+    fn tail_position(&self) -> Option<Position> {
+        self.knots.iter().rev().next().copied()
+    }
+
     fn all_close_enough(&self) -> bool {
         self.knots
             .iter()
@@ -65,7 +65,12 @@ impl Rope {
     fn perform_move(&mut self, head_direction: CompassDirection) {
         assert!(self.all_close_enough()); // invariant
         self.knots[0] = self.knots[0].move_direction(&head_direction);
-        visit_pairs(&mut self.knots, update_knot_position);
+        // Visit each pair of knots (a,b), starting at the head end (a
+        // is the knot nearest the head).  Update the position of b if
+        // it is too far away from a.
+        visit_pairs(&mut self.knots, |a, b| {
+            *b = maybe_move_tail(a, *b);
+        });
         assert!(self.all_close_enough()); // invariant
     }
 }
@@ -96,7 +101,6 @@ impl TryFrom<&str> for Move {
                 direction: CompassDirection::West,
                 count: convert_count(count)?,
             }),
-
             ("R ", count) => Ok(Move {
                 direction: CompassDirection::East,
                 count: convert_count(count)?,
@@ -106,32 +110,36 @@ impl TryFrom<&str> for Move {
     }
 }
 
-fn perform_sequence<'a, I: IntoIterator<Item = &'a Move>>(start: Rope, moves: I) -> Vec<Rope> {
+/// Perform a sequence of moves of the head end of the rope, and
+/// return a vector containing the successive positions occupied by
+/// the tail of the rope.
+fn perform_sequence(start: Rope, moves: &[Move]) -> Vec<Position> {
     struct State {
         current: Rope,
-        history: Vec<Rope>,
+        tail_history: Vec<Position>,
     }
-    fn update(now: State, thismove: &Move) -> State {
-        let State {
-            mut current,
-            mut history,
-        } = now;
+    fn update(mut accumulator: State, thismove: &Move) -> State {
         for _ in 0..thismove.count {
-            current.perform_move(thismove.direction);
-            history.push(current.clone());
+            accumulator.current.perform_move(thismove.direction);
+            accumulator
+                .tail_history
+                .extend(accumulator.current.tail_position());
         }
-        State { current, history }
+        accumulator
     }
+    // The initial tail history is a Vec of size 0 (if there are zero
+    // knots) or 1 (if there is at least one knot in the rope).
+    let tail_history: Vec<Position> = start.tail_position().into_iter().collect();
     moves
-        .into_iter()
+        .iter()
         .fold(
             State {
-                current: start.clone(),
-                history: vec![start],
+                current: start,
+                tail_history,
             },
             update,
         )
-        .history
+        .tail_history
 }
 
 fn parse_moves(s: &str) -> Result<Vec<Move>, Fail> {
@@ -139,12 +147,12 @@ fn parse_moves(s: &str) -> Result<Vec<Move>, Fail> {
 }
 
 fn count_unique_tail_positions(moves: &[Move], len: usize) -> usize {
-    let history = perform_sequence(Rope::new(len), moves);
-    let positions: HashSet<Position> = history
+    // Count the unique positions by collecting the items into a hash
+    // set and then returning the size of the set.
+    perform_sequence(Rope::new(len), moves)
         .into_iter()
-        .filter_map(|mut rope| rope.knots.pop())
-        .collect();
-    positions.len()
+        .collect::<HashSet<Position>>()
+        .len()
 }
 
 fn solve_part1(moves: &[Move]) -> usize {
@@ -160,7 +168,7 @@ fn test_count_unique_tail_positions() {
     const EXAMPLE: &str =
         concat!("R 4\n", "U 4\n", "L 3\n", "D 1\n", "R 4\n", "D 1\n", "L 5\n", "R 2\n",);
     let moves = parse_moves(EXAMPLE).expect("example should be valid");
-    assert_eq!(count_unique_tail_positions(moves, 2), 13);
+    assert_eq!(count_unique_tail_positions(&moves, 2), 13);
 }
 
 fn main() {
