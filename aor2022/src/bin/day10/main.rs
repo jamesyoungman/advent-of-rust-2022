@@ -1,7 +1,44 @@
+use std::fmt;
+use std::fmt::Write;
 use std::str;
 
 use lib::error::Fail;
 use sscanf::scanf;
+
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
+struct ClockValue(i64);
+
+const PIXEL_SET: char = '\u{2588}';
+const PIXEL_UNSET: char = '\u{2592}';
+
+impl ClockValue {
+    fn succ(&self) -> ClockValue {
+        ClockValue(self.0 + 1)
+    }
+
+    fn to_pixel_position(self) -> usize {
+        (self.0 as usize - 1) % 40
+    }
+
+    fn display_line_offset(self) -> usize {
+        40 * ((self.0 as usize - 1) / 40)
+    }
+}
+
+impl fmt::Display for ClockValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
+struct RegisterValue(i64);
+
+impl fmt::Display for RegisterValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
 
 #[derive(Debug, Eq, PartialEq)]
 enum Instruction {
@@ -22,11 +59,11 @@ impl TryFrom<&str> for Instruction {
     }
 }
 
-impl Instruction {
-    fn cycles(&self) -> i64 {
+impl fmt::Display for Instruction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Instruction::Noop => 1,
-            Instruction::Addx(_) => 2,
+            Instruction::Noop => f.write_str("noop"),
+            Instruction::Addx(n) => write!(f, "addx {}", n),
         }
     }
 }
@@ -41,97 +78,177 @@ fn test_instruction_try_from() {
     assert!(Instruction::try_from("jmp 2").is_err());
 }
 
-struct Cpu {
-    x: i64,
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
+enum InstructionStage {
+    Start,
+    During,
+    Complete,
 }
 
-fn sample_cycle(before: i64, after: i64) -> Option<i64> {
+impl fmt::Display for InstructionStage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            InstructionStage::Start => "start",
+            InstructionStage::During => "during",
+            InstructionStage::Complete => "after",
+        })
+    }
+}
+
+struct Cpu {
+    x: RegisterValue,
+}
+
+fn is_sample_cycle(tickval: ClockValue) -> bool {
     const BOUNDARIES: [i64; 6] = [20, 60, 100, 140, 180, 220];
-    BOUNDARIES
-        .into_iter()
-        .find(|&boundary| before < boundary && after >= boundary)
+    BOUNDARIES.into_iter().any(|boundary| boundary == tickval.0)
+}
+
+fn cpu_is_drawing(xregister: RegisterValue, pixpos: usize) -> bool {
+    let sprite_left: i64 = xregister.0 - 1;
+    let sprite_right: i64 = xregister.0 + 1;
+    let p = pixpos as i64;
+    p >= sprite_left && p <= sprite_right
+}
+
+#[test]
+fn test_cpu_is_drawing() {
+    assert!(cpu_is_drawing(RegisterValue(-1), 0));
+    assert!(!cpu_is_drawing(RegisterValue(-1), 1));
+    assert!(!cpu_is_drawing(RegisterValue(-1), 2));
+
+    assert!(cpu_is_drawing(RegisterValue(0), 0));
+    assert!(cpu_is_drawing(RegisterValue(0), 1));
+    assert!(!cpu_is_drawing(RegisterValue(0), 2));
+
+    assert!(cpu_is_drawing(RegisterValue(1), 0));
+    assert!(cpu_is_drawing(RegisterValue(1), 1));
+    assert!(cpu_is_drawing(RegisterValue(1), 2));
+    assert!(!cpu_is_drawing(RegisterValue(1), 3));
+}
+
+fn sprite_diagram(clock: ClockValue, xregister: RegisterValue) -> String {
+    let base = (clock.0 as usize / 40) * 40;
+    (0..40)
+        .map(|loc| {
+            if cpu_is_drawing(xregister, base + loc) {
+                PIXEL_SET
+            } else {
+                PIXEL_UNSET
+            }
+        })
+        .collect()
 }
 
 impl Cpu {
     fn new() -> Cpu {
-        Cpu { x: 1 }
+        Cpu {
+            x: RegisterValue(1),
+        }
     }
 
-    /// Simulate an instruction, returning the new clock value.
-    // If execution spans a cycle which is a multiple of 20, return
-    // the cycle number and x register value occuring on that cycle.
-    fn simulate_instruction(&mut self, oldclock: i64, insn: &Instruction) -> (i64, Option<i64>) {
-        let duration = insn.cycles();
-        let newx = match insn {
-            Instruction::Noop => self.x,
-            Instruction::Addx(increment) => self.x + increment,
-        };
-        let newclock = oldclock + duration;
-        //dbg!(&insn);
-        //dbg!(oldclock);
-        //dbg!(newclock);
-        //dbg!(self.x);
-        let sample = match sample_cycle(oldclock, newclock) {
-            Some(sample_cycle) => {
-                //dbg!(sample_cycle);
-                Some(
-                    sample_cycle
-                        * if sample_cycle == newclock {
-                            newx
-                        } else {
-                            self.x
-                        },
-                )
+    fn simulate_instruction<F>(
+        &mut self,
+        oldclock: ClockValue,
+        insn: &Instruction,
+        mut ticker: F,
+    ) -> ClockValue
+    where
+        F: FnMut(InstructionStage, ClockValue, RegisterValue),
+    {
+        match insn {
+            Instruction::Noop => {
+                ticker(InstructionStage::Start, oldclock, self.x);
+                ticker(InstructionStage::During, oldclock, self.x);
+                ticker(InstructionStage::Complete, oldclock, self.x);
+                oldclock.succ()
             }
-            None => None,
-        };
-        self.x = newx;
-        (newclock, sample)
+            Instruction::Addx(increment) => {
+                // 2 cycles
+                // Complete the first cycle and start the second
+                ticker(InstructionStage::Start, oldclock, self.x);
+                ticker(InstructionStage::During, oldclock, self.x);
+                ticker(InstructionStage::Complete, oldclock, self.x);
+                // The X register is updated _after_ the second cycle.
+                ticker(InstructionStage::Start, oldclock.succ(), self.x);
+                ticker(InstructionStage::During, oldclock.succ(), self.x);
+                self.x.0 += increment;
+                ticker(InstructionStage::Complete, oldclock.succ(), self.x);
+                oldclock.succ().succ()
+            }
+        }
     }
+}
+
+fn one_part1_instruction(
+    cpu: &mut Cpu,
+    clock: ClockValue,
+    inst: &Instruction,
+) -> (ClockValue, Option<i64>) {
+    let mut sample: Option<i64> = None;
+    let ticker = |stage, clock: ClockValue, x: RegisterValue| {
+        if stage == InstructionStage::During && is_sample_cycle(clock) {
+            let result = clock.0 * x.0;
+            sample = Some(result);
+        }
+    };
+    let newclock = cpu.simulate_instruction(clock, inst, ticker);
+    (newclock, sample)
 }
 
 #[test]
 fn test_simulate() {
     let mut cpu = Cpu::new();
-    assert_eq!(cpu.simulate_instruction(0, &Instruction::Noop), (1, None));
-    assert_eq!(cpu.x, 1);
     assert_eq!(
-        cpu.simulate_instruction(1, &Instruction::Addx(3)),
-        (3, None)
+        one_part1_instruction(&mut cpu, ClockValue(0), &Instruction::Noop),
+        (ClockValue(1), None)
     );
-    assert_eq!(cpu.x, 4);
+    assert_eq!(cpu.x, RegisterValue(1));
     assert_eq!(
-        cpu.simulate_instruction(3, &Instruction::Addx(-5)),
-        (5, None)
+        one_part1_instruction(&mut cpu, ClockValue(1), &Instruction::Addx(3)),
+        (ClockValue(3), None)
     );
-    assert_eq!(cpu.x, -1);
+    assert_eq!(cpu.x, RegisterValue(4));
+    assert_eq!(
+        one_part1_instruction(&mut cpu, ClockValue(3), &Instruction::Addx(-5)),
+        (ClockValue(5), None)
+    );
+    assert_eq!(cpu.x, RegisterValue(-1));
 }
 
 #[test]
 fn test_simulate_samples() {
     let mut cpu = Cpu::new();
 
-    // This instruction hits a sample point on its final cycle.
+    // This instruction does not yet hit a sample point.
     assert_eq!(
-        cpu.simulate_instruction(18, &Instruction::Addx(5)),
-        (20, Some(20 * 6))
+        one_part1_instruction(&mut cpu, ClockValue(18), &Instruction::Addx(5)),
+        (ClockValue(20), None)
     );
+    assert_eq!(cpu.x, RegisterValue(6));
+    // This instruction hits a sample point
+    assert_eq!(
+        one_part1_instruction(&mut cpu, ClockValue(20), &Instruction::Noop),
+        (ClockValue(21), Some(20 * 6))
+    );
+    assert_eq!(cpu.x, RegisterValue(6));
 
-    // This instruction hits a sample point before its final cycle.
+    // This instruction hits a sample point before its final cycle
+    // (i.e. before the add has taken effect).
     assert_eq!(
-        cpu.simulate_instruction(19, &Instruction::Addx(5)),
-        (21, Some(20 * 6))
+        one_part1_instruction(&mut cpu, ClockValue(19), &Instruction::Addx(5)),
+        (ClockValue(21), Some(20 * 6))
     );
+    assert_eq!(cpu.x, RegisterValue(11));
 }
 
 fn part1(program: &[Instruction]) -> i64 {
     let mut tot: i64 = 0;
     let mut cpu = Cpu::new();
-    let mut clock: i64 = 1;
+    let mut clock: ClockValue = ClockValue(1);
     for insn in program.iter() {
-        let (newclock, sample) = cpu.simulate_instruction(clock, insn);
+        let (newclock, sample) = one_part1_instruction(&mut cpu, clock, insn);
         if let Some(v) = sample {
-            //println!("sample value: {v}");
             tot += v;
         }
         clock = newclock;
@@ -290,6 +407,29 @@ const EXAMPLE: &str = concat!(
 );
 
 #[test]
+fn test_small_example() {
+    let program: Vec<Instruction> = concat!("noop\n", "addx 3\n", "addx -5\n")
+        .split_terminator('\n')
+        .map(Instruction::try_from)
+        .collect::<Result<Vec<Instruction>, Fail>>()
+        .expect("small example should be a valid program");
+    let mut cpu = Cpu::new();
+    //let do_nothing_ticker = |_s: InstructionStage, _c: ClockValue, _r: RegisterValue| ();
+    assert_eq!(
+        one_part1_instruction(&mut cpu, ClockValue(1), &program[0]),
+        (ClockValue(2), None)
+    );
+    assert_eq!(
+        one_part1_instruction(&mut cpu, ClockValue(2), &program[1]),
+        (ClockValue(4), None)
+    );
+    assert_eq!(
+        one_part1_instruction(&mut cpu, ClockValue(1), &program[0]),
+        (ClockValue(2), None)
+    );
+}
+
+#[test]
 fn test_part1() {
     let program: Vec<Instruction> = EXAMPLE
         .split_terminator('\n')
@@ -297,6 +437,122 @@ fn test_part1() {
         .collect::<Result<Vec<Instruction>, Fail>>()
         .expect("example should be a valid program");
     assert_eq!(part1(&program), 13140);
+}
+
+fn crt_row(pixels: &[char], line_offset: usize, _pixpos: usize) -> String {
+    dbg!(line_offset);
+    dbg!(_pixpos);
+    pixels[line_offset..(line_offset + 40)].iter().collect()
+}
+
+fn maybe_draw(
+    line_offset: usize,
+    pixpos: usize,
+    xregister: RegisterValue,
+    pixels: &mut [char],
+    verbose: bool,
+) {
+    if cpu_is_drawing(xregister, pixpos) {
+        if verbose {
+            println!(
+                "maybe_draw: {xregister} matches {pixpos}, hence drawing # at {}",
+                line_offset + pixpos
+            );
+        }
+        pixels[line_offset + pixpos] = PIXEL_SET
+    } else if verbose {
+        println!("maybe_draw: {xregister} does not match {pixpos}, hence .");
+    }
+}
+
+fn on_tick(
+    insn: &Instruction,
+    stage: InstructionStage,
+    clock: ClockValue,
+    x: RegisterValue,
+    pixels: &mut [char],
+    verbose: bool,
+) {
+    match stage {
+        InstructionStage::Start => {
+            if verbose {
+                println!();
+                println!("Start cycle  {clock:>4}: begin executing {insn}");
+            }
+        }
+
+        InstructionStage::During => {
+            let pixpos = clock.to_pixel_position();
+            let line_offset: usize = clock.display_line_offset();
+            maybe_draw(line_offset, pixpos, x, pixels, verbose);
+            if verbose {
+                println!("During cycle {clock:>4}: CRT draws pixel in position {pixpos}");
+                println!(
+                    "Current CRT row  : {}",
+                    crt_row(pixels, line_offset, pixpos)
+                );
+            }
+        }
+
+        InstructionStage::Complete => {
+            if verbose {
+                println!(
+                    "End of cycle {clock:>4}: finish executing {insn} (Register X is now {x})"
+                );
+                println!("Sprite position  : {}", sprite_diagram(clock, x));
+            }
+        }
+    }
+}
+
+fn part2(program: &[Instruction]) -> String {
+    const SCREEN_LEN: usize = 240;
+    let mut pixels: Vec<char> = Vec::with_capacity(SCREEN_LEN);
+    pixels.resize(SCREEN_LEN, PIXEL_UNSET);
+
+    let mut cpu = Cpu::new();
+    let mut clock: ClockValue = ClockValue(1);
+
+    for insn in program.iter() {
+        let mut ticker = |stage: InstructionStage, clock: ClockValue, x: RegisterValue| {
+            on_tick(insn, stage, clock, x, &mut pixels, false);
+        };
+        clock = cpu.simulate_instruction(clock, insn, &mut ticker);
+    }
+    let mut result: String = String::new();
+    for (i, chunk) in pixels.chunks(40).enumerate() {
+        let chunk_str: String = chunk.iter().collect();
+        writeln!(
+            result,
+            "Cycle {:>3} -> {} <- Cycle {:>3}",
+            (i * 40) + 1,
+            chunk_str,
+            (i * 40) + 40
+        )
+        .expect("output write error");
+    }
+    result
+}
+
+#[test]
+fn test_part2() {
+    let program: Vec<Instruction> = EXAMPLE
+        .split_terminator('\n')
+        .map(Instruction::try_from)
+        .collect::<Result<Vec<Instruction>, Fail>>()
+        .expect("example should be a valid program");
+    let output = part2(&program);
+    assert_eq!(
+        output,
+        concat!(
+            "Cycle   1 -> ██▒▒██▒▒██▒▒██▒▒██▒▒██▒▒██▒▒██▒▒██▒▒██▒▒ <- Cycle  40\n",
+            "Cycle  41 -> ███▒▒▒███▒▒▒███▒▒▒███▒▒▒███▒▒▒███▒▒▒███▒ <- Cycle  80\n",
+            "Cycle  81 -> ████▒▒▒▒████▒▒▒▒████▒▒▒▒████▒▒▒▒████▒▒▒▒ <- Cycle 120\n",
+            "Cycle 121 -> █████▒▒▒▒▒█████▒▒▒▒▒█████▒▒▒▒▒█████▒▒▒▒▒ <- Cycle 160\n",
+            "Cycle 161 -> ██████▒▒▒▒▒▒██████▒▒▒▒▒▒██████▒▒▒▒▒▒████ <- Cycle 200\n",
+            "Cycle 201 -> ███████▒▒▒▒▒▒▒███████▒▒▒▒▒▒▒███████▒▒▒▒▒ <- Cycle 240\n",
+        )
+    );
 }
 
 fn main() {
@@ -307,4 +563,5 @@ fn main() {
         .collect::<Result<Vec<Instruction>, Fail>>()
         .expect("puzzle input should be a valid program");
     println!("Day 10 part 1: {}", part1(&program));
+    println!("Day 10 part 2:\n{}", part2(&program));
 }
