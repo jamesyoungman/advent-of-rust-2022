@@ -20,7 +20,7 @@ impl ClockValue {
         (self.0 as usize - 1) % 40
     }
 
-    fn display_line_offset(self) -> usize {
+    fn to_display_line_offset(self) -> usize {
         40 * ((self.0 as usize - 1) / 40)
     }
 }
@@ -78,23 +78,6 @@ fn test_instruction_try_from() {
     assert!(Instruction::try_from("jmp 2").is_err());
 }
 
-#[derive(Debug, Eq, PartialEq, Clone, Copy)]
-enum InstructionStage {
-    Start,
-    During,
-    Complete,
-}
-
-impl fmt::Display for InstructionStage {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            InstructionStage::Start => "start",
-            InstructionStage::During => "during",
-            InstructionStage::Complete => "after",
-        })
-    }
-}
-
 struct Cpu {
     x: RegisterValue,
 }
@@ -127,19 +110,6 @@ fn test_cpu_is_drawing() {
     assert!(!cpu_is_drawing(RegisterValue(1), 3));
 }
 
-fn sprite_diagram(clock: ClockValue, xregister: RegisterValue) -> String {
-    let base = (clock.0 as usize / 40) * 40;
-    (0..40)
-        .map(|loc| {
-            if cpu_is_drawing(xregister, base + loc) {
-                PIXEL_SET
-            } else {
-                PIXEL_UNSET
-            }
-        })
-        .collect()
-}
-
 impl Cpu {
     fn new() -> Cpu {
         Cpu {
@@ -154,26 +124,20 @@ impl Cpu {
         mut ticker: F,
     ) -> ClockValue
     where
-        F: FnMut(InstructionStage, ClockValue, RegisterValue),
+        F: FnMut(ClockValue, RegisterValue),
     {
         match insn {
             Instruction::Noop => {
-                ticker(InstructionStage::Start, oldclock, self.x);
-                ticker(InstructionStage::During, oldclock, self.x);
-                ticker(InstructionStage::Complete, oldclock, self.x);
+                ticker(oldclock, self.x);
                 oldclock.succ()
             }
             Instruction::Addx(increment) => {
                 // 2 cycles
                 // Complete the first cycle and start the second
-                ticker(InstructionStage::Start, oldclock, self.x);
-                ticker(InstructionStage::During, oldclock, self.x);
-                ticker(InstructionStage::Complete, oldclock, self.x);
+                ticker(oldclock, self.x);
                 // The X register is updated _after_ the second cycle.
-                ticker(InstructionStage::Start, oldclock.succ(), self.x);
-                ticker(InstructionStage::During, oldclock.succ(), self.x);
+                ticker(oldclock.succ(), self.x);
                 self.x.0 += increment;
-                ticker(InstructionStage::Complete, oldclock.succ(), self.x);
                 oldclock.succ().succ()
             }
         }
@@ -186,8 +150,8 @@ fn one_part1_instruction(
     inst: &Instruction,
 ) -> (ClockValue, Option<i64>) {
     let mut sample: Option<i64> = None;
-    let ticker = |stage, clock: ClockValue, x: RegisterValue| {
-        if stage == InstructionStage::During && is_sample_cycle(clock) {
+    let ticker = |clock: ClockValue, x: RegisterValue| {
+        if is_sample_cycle(clock) {
             let result = clock.0 * x.0;
             sample = Some(result);
         }
@@ -414,7 +378,7 @@ fn test_small_example() {
         .collect::<Result<Vec<Instruction>, Fail>>()
         .expect("small example should be a valid program");
     let mut cpu = Cpu::new();
-    //let do_nothing_ticker = |_s: InstructionStage, _c: ClockValue, _r: RegisterValue| ();
+    //let do_nothing_ticker = |_c: ClockValue, _r: RegisterValue| ();
     assert_eq!(
         one_part1_instruction(&mut cpu, ClockValue(1), &program[0]),
         (ClockValue(2), None)
@@ -439,69 +403,10 @@ fn test_part1() {
     assert_eq!(part1(&program), 13140);
 }
 
-fn crt_row(pixels: &[char], line_offset: usize, _pixpos: usize) -> String {
-    dbg!(line_offset);
-    dbg!(_pixpos);
-    pixels[line_offset..(line_offset + 40)].iter().collect()
-}
-
-fn maybe_draw(
-    line_offset: usize,
-    pixpos: usize,
-    xregister: RegisterValue,
-    pixels: &mut [char],
-    verbose: bool,
-) {
-    if cpu_is_drawing(xregister, pixpos) {
-        if verbose {
-            println!(
-                "maybe_draw: {xregister} matches {pixpos}, hence drawing # at {}",
-                line_offset + pixpos
-            );
-        }
-        pixels[line_offset + pixpos] = PIXEL_SET
-    } else if verbose {
-        println!("maybe_draw: {xregister} does not match {pixpos}, hence .");
-    }
-}
-
-fn on_tick(
-    insn: &Instruction,
-    stage: InstructionStage,
-    clock: ClockValue,
-    x: RegisterValue,
-    pixels: &mut [char],
-    verbose: bool,
-) {
-    match stage {
-        InstructionStage::Start => {
-            if verbose {
-                println!();
-                println!("Start cycle  {clock:>4}: begin executing {insn}");
-            }
-        }
-
-        InstructionStage::During => {
-            let pixpos = clock.to_pixel_position();
-            let line_offset: usize = clock.display_line_offset();
-            maybe_draw(line_offset, pixpos, x, pixels, verbose);
-            if verbose {
-                println!("During cycle {clock:>4}: CRT draws pixel in position {pixpos}");
-                println!(
-                    "Current CRT row  : {}",
-                    crt_row(pixels, line_offset, pixpos)
-                );
-            }
-        }
-
-        InstructionStage::Complete => {
-            if verbose {
-                println!(
-                    "End of cycle {clock:>4}: finish executing {insn} (Register X is now {x})"
-                );
-                println!("Sprite position  : {}", sprite_diagram(clock, x));
-            }
-        }
+fn on_tick(_insn: &Instruction, clock: ClockValue, x: RegisterValue, pixels: &mut [char]) {
+    let pixpos = clock.to_pixel_position();
+    if cpu_is_drawing(x, pixpos) {
+        pixels[clock.to_display_line_offset() + pixpos] = PIXEL_SET
     }
 }
 
@@ -514,8 +419,8 @@ fn part2(program: &[Instruction]) -> String {
     let mut clock: ClockValue = ClockValue(1);
 
     for insn in program.iter() {
-        let mut ticker = |stage: InstructionStage, clock: ClockValue, x: RegisterValue| {
-            on_tick(insn, stage, clock, x, &mut pixels, false);
+        let mut ticker = |clock: ClockValue, x: RegisterValue| {
+            on_tick(insn, clock, x, &mut pixels);
         };
         clock = cpu.simulate_instruction(clock, insn, &mut ticker);
     }
