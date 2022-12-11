@@ -403,7 +403,7 @@ fn test_part1() {
     assert_eq!(part1(&program), 13140);
 }
 
-fn on_tick(_insn: &Instruction, clock: ClockValue, x: RegisterValue, pixels: &mut [char]) {
+fn on_tick(clock: ClockValue, x: RegisterValue, pixels: &mut [char]) {
     let pixpos = clock.to_pixel_position();
     if cpu_is_drawing(x, pixpos) {
         pixels[clock.to_display_line_offset() + pixpos] = PIXEL_SET
@@ -418,10 +418,10 @@ fn part2(program: &[Instruction]) -> String {
     let mut cpu = Cpu::new();
     let mut clock: ClockValue = ClockValue(1);
 
+    let mut ticker = |clock: ClockValue, x: RegisterValue| {
+        on_tick(clock, x, &mut pixels);
+    };
     for insn in program.iter() {
-        let mut ticker = |clock: ClockValue, x: RegisterValue| {
-            on_tick(insn, clock, x, &mut pixels);
-        };
         clock = cpu.simulate_instruction(clock, insn, &mut ticker);
     }
     let mut result: String = String::new();
