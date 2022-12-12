@@ -46,15 +46,21 @@ enum Instruction {
     Addx(i64),
 }
 
+fn parse_addx(s: &str) -> Result<Instruction, Fail> {
+    #[allow(clippy::from_str_radix_10)]
+    match scanf!(s, "addx {i64:r10}") {
+        Ok(n) => Ok(Instruction::Addx(n)),
+        Err(_) => Err(Fail(format!("unrecognised instruction {s}"))),
+    }
+}
+
 impl TryFrom<&str> for Instruction {
     type Error = Fail;
     fn try_from(s: &str) -> Result<Instruction, Fail> {
         if s == "noop" {
             Ok(Instruction::Noop)
-        } else if let Ok(n) = scanf!(s, "addx {i64:r10}") {
-            Ok(Instruction::Addx(n))
         } else {
-            Err(Fail(format!("unrecognised instruction {s}")))
+            parse_addx(s)
         }
     }
 }

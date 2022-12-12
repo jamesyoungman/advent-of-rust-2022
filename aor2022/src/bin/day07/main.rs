@@ -158,6 +158,7 @@ fn parse_commands(s: &str) -> Result<FileSystem, Fail> {
                 Ok(dirname) => {
                     fs.add_dir(cwd, dirname);
                 }
+                #[allow(clippy::from_str_radix_10)]
                 Err(_) => match scanf!(command_or_output, "{usize:r10} {str}") {
                     Ok((file_len, filename)) => {
                         fs.add_file(cwd, filename, file_len);
