@@ -73,21 +73,27 @@ impl Position {
         }
     }
 
-    pub fn xbearing(&self, to: &Position) -> Result<Option<CompassDirection>, ()> {
+    pub fn neighbour_xbearing(&self, to: &Position) -> Result<Option<CompassDirection>, String> {
         match self.x - to.x {
             -1 => Ok(Some(CompassDirection::West)),
             0 => Ok(None),
             1 => Ok(Some(CompassDirection::East)),
-            _ => Err(()),
+            _ => Err(format!(
+                "x-coordinates {} and {} are too far apart",
+                self.x, to.x
+            )),
         }
     }
 
-    pub fn ybearing(&self, to: &Position) -> Result<Option<CompassDirection>, ()> {
+    pub fn neighbour_ybearing(&self, to: &Position) -> Result<Option<CompassDirection>, String> {
         match self.y - to.y {
             -1 => Ok(Some(CompassDirection::North)),
             0 => Ok(None),
             1 => Ok(Some(CompassDirection::South)),
-            _ => Err(()),
+            _ => Err(format!(
+                "y-coordinates {} and {} are too far apart",
+                self.y, to.y
+            )),
         }
     }
 }

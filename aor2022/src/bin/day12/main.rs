@@ -6,8 +6,9 @@ use std::str;
 use lib::error::Fail;
 use lib::grid::{Position, ALL_MOVE_OPTIONS};
 
-use petgraph::algo::bellman_ford;
-use petgraph::Graph;
+//use petgraph::algo::bellman_ford;
+//use petgraph::visit::NodeIndexable;
+//use petgraph::Graph;
 
 fn elevation(ch: char) -> i64 {
     match ch {
@@ -39,12 +40,9 @@ impl TryFrom<&str> for Grid {
                     x: usize_to_i64(column),
                     y: usize_to_i64(line_number),
                 };
-                //println!("adding '{ch}' at {p}");
                 if ch == 'S' {
-                    //println!("the start is at {p}");
                     start = Some(p);
                 } else if ch == 'E' {
-                    //println!("the goal is at {p}");
                     goal = Some(p);
                 }
                 squares.insert(p, ch);
@@ -73,7 +71,7 @@ impl Grid {
         fn offgrid(p: Position) -> Fail {
             Fail(format!("{p} is not on the grid"))
         }
-        let result = match (from.xbearing(&to), from.ybearing(&to)) {
+        let result = match (from.neighbour_xbearing(&to), from.neighbour_ybearing(&to)) {
             (Ok(None), Ok(None)) => Err(Fail(format!(
                 "there is no edge allowed from {from} to {to} (which is itself)"
             ))),
@@ -81,10 +79,7 @@ impl Grid {
                 // Check the heights.
                 match self.squares.get(&from) {
                     Some(fromch) => match self.squares.get(&to) {
-                        Some(toch) => {
-                            //println!("checking height constaints for {fromch}->{toch}");
-                            Ok(Grid::permitted_move(*fromch, *toch))
-                        }
+                        Some(toch) => Ok(Grid::permitted_move(*fromch, *toch)),
                         None => Err(offgrid(to)),
                     },
                     None => Err(offgrid(from)),
@@ -94,7 +89,6 @@ impl Grid {
                 "{from} and {to} are not close enough together to have an edge"
             ))),
         };
-        //println!("edge_exists(({from}),({to})): {result:?}");
         result
     }
 
@@ -102,34 +96,25 @@ impl Grid {
         let mut result = Vec::new();
         for direction in ALL_MOVE_OPTIONS {
             let next = from.move_direction(&direction);
-            //println!("considering {from} -> {next}");
             if self.edge_exists(from, next).unwrap_or(false) {
-                //println!("edge {from} -> {next} does exist");
                 result.push(next);
-            } else {
-                //println!("edge {from} -> {next} does not exist");
             }
         }
         result
     }
 
-    fn prev_steps(&self, to: Position) -> Vec<Position> {
-        let mut result = Vec::new();
-        for direction in ALL_MOVE_OPTIONS {
-            let prev = to.move_direction(&direction);
-            //println!("considering {prev} -> {to}");
-            if self.edge_exists(prev, to).unwrap_or(false) {
-                //println!("edge {prev} -> {to} does exist");
-                result.push(prev);
-            } else {
-                //println!("edge {prev} -> {to} does not exist");
-            }
-        }
-        result
-    }
+    //fn prev_steps(&self, to: Position) -> Vec<Position> {
+    //    let mut result = Vec::new();
+    //    for direction in ALL_MOVE_OPTIONS {
+    //        let prev = to.move_direction(&direction);
+    //        if self.edge_exists(prev, to).unwrap_or(false) {
+    //            result.push(prev);
+    //        }
+    //    }
+    //    result
+    //}
 
     fn find_shortest_path(&self, start: Position) -> Result<Option<Vec<Position>>, Fail> {
-        //dbg!(&self);
         let goal: Position = self
             .goal
             .ok_or_else(|| Fail("graph has no goal 'E' node".to_string()))?;
@@ -150,7 +135,6 @@ where
     visited.insert(start, start);
 
     while let Some(p) = frontier.pop_front() {
-        //println!("considering {p}; {} items in the frontier", frontier.len());
         if p == goal {
             let mut path: Vec<Position> = Vec::new();
             let mut q = goal;
@@ -169,11 +153,8 @@ where
             return Some(path);
         }
         let nv = neighbours(p);
-        //println!("{p} has {} neighbours", nv.len());
         for n in nv.iter() {
-            //println!("considering edge from {p} to {n}...");
             if !visited.contains_key(n) {
-                //println!("we have not previously visited {n}, adding it to the frontier...");
                 visited.insert(*n, p);
                 frontier.push_back(*n);
             }
@@ -213,71 +194,80 @@ fn test_part1_example() {
     assert_eq!(solve_part1(example), 31);
 }
 
-fn solve_part2_bf(s: &str) -> usize {
-    const FIXED_COST: f64 = 1.0;
-    let grid = Grid::try_from(s).expect("valid input");
-    let mut graph = Graph::<Position, f64>::new();
-    let mut node_index: HashMap<Position, _> = HashMap::new();
-    let mut goal_ix: Option<_> = None;
-    // We're using the bellman-ford algorithm which gives shortest
-    // paths from a single source to all other vertices.  So as source
-    // we use the 'E' square (which in reality is our destination).
-    // This means that all our edges have to point backwards.
-    for (pos, ch) in grid.squares.iter() {
-        let dest_ix = match node_index.get(pos) {
-            Some(ix) => *ix,
-            None => graph.add_node(*pos),
-        };
-        if *ch == 'E' {
-            goal_ix = Some(dest_ix);
-        }
-        for prev in grid.prev_steps(*pos) {
-            let prev_ix = match node_index.get(&prev) {
-                Some(ix) => *ix,
-                None => graph.add_node(prev),
-            };
-            // This is a backward edge, see above.
-            //println!("adding downhill-ish edge {prev_ix:?}->{dest_ix:?} (i.e. {pos}->{prev})");
-            graph.update_edge(prev_ix, dest_ix, FIXED_COST);
-        }
-    }
-    match goal_ix {
-        Some(g) => match bellman_ford(&graph, g) {
-            Ok(path) => {
-                // path.distances gives the distance from the source
-                // (here, 'E') to each node.
-                //dbg!(&path);
-                let a = elevation('a');
-                let candidates: Vec<Position> = grid
-                    .squares
-                    .iter()
-                    .filter_map(
-                        |(pos, ch)| {
-                            if elevation(*ch) == a {
-                                Some(pos)
-                            } else {
-                                None
-                            }
-                        },
-                    )
-                    .copied()
-                    .collect();
-                unreachable!();
-                //let shortest = candidates
-                //    .iter()
-                //    .map(|pos| node_index[pos])
-                //    .map(|ix| path.distances[usize::from(ix)])
-                //    .min();
-            }
-            Err(negative_loop) => {
-                unreachable!("the fixed cost should be positive");
-            }
-        },
-        None => {
-            panic!("the grid has no goal node");
-        }
-    }
-}
+//fn solve_part2_bf(s: &str) -> Option<usize> {
+//    const FIXED_COST: f64 = 1.0;
+//    let grid = Grid::try_from(s).expect("valid input");
+//    let mut graph = Graph::<Position, f64>::new();
+//    let mut node_index: HashMap<Position, _> = HashMap::new();
+//    let mut goal_ix: Option<_> = None;
+//    // We're using the bellman-ford algorithm which gives shortest
+//    // paths from a single source to all other vertices.  So as source
+//    // we use the 'E' square (which in reality is our destination).
+//    // This means that all our edges have to point backwards.
+//    for (pos, ch) in grid.squares.iter() {
+//        let dest_ix = match node_index.get(pos) {
+//            Some(ix) => *ix,
+//            None => {
+//                let ix = graph.add_node(*pos);
+//                node_index.insert(*pos, ix);
+//                ix
+//            }
+//        };
+//        if *ch == 'E' {
+//            goal_ix = Some(dest_ix);
+//        }
+//        for prev in grid.prev_steps(*pos) {
+//            let prev_ix = match node_index.get(&prev) {
+//                Some(ix) => *ix,
+//                None => {
+//                    let ix = graph.add_node(prev);
+//                    node_index.insert(prev, ix);
+//                    ix
+//                }
+//            };
+//            // This is a backward edge, see above.
+//            graph.update_edge(prev_ix, dest_ix, FIXED_COST);
+//        }
+//    }
+//    match goal_ix {
+//        Some(g) => match bellman_ford(&graph, g) {
+//            Ok(path) => {
+//                dbg!(&path);
+//                // path.distances gives the distance from the source
+//                // (here, 'E') to each node.
+//                let a = elevation('a');
+//                let candidates: Vec<(Position, _)> = grid
+//                    .squares
+//                    .iter()
+//                    .filter_map(|(pos, ch)| {
+//                        if elevation(*ch) == a {
+//                            match node_index.get(pos) {
+//                                Some(ix) => Some((*pos, ix)),
+//                                None => panic!("index is incomplete"),
+//                            }
+//                        } else {
+//                            None
+//                        }
+//                    })
+//                    .collect();
+//                todo!()
+//                //candidates
+//                //    .iter()
+//                //    .map(|(pos, ix)| {
+//                //        let i: usize = graph.to_index(*pos);
+//                //        path.distances[i]
+//                //    })
+//                //    .min()
+//            }
+//            Err(_negative_loop) => {
+//                unreachable!("the fixed cost should be positive");
+//            }
+//        },
+//        None => {
+//            panic!("the grid has no goal node");
+//        }
+//    }
+//}
 
 fn solve_part2_bruteforce(s: &str) -> Option<usize> {
     let grid = Grid::try_from(s).expect("valid input");
@@ -314,6 +304,21 @@ fn test_part2_example_bruteforce() {
         29
     );
 }
+
+//#[test]
+//fn test_part2_example_bellman_ford() {
+//    let example = concat!(
+//        "Sabqponm\n",
+//        "abcryxxl\n",
+//        "accszExk\n",
+//        "acctuvwj\n",
+//        "abdefghi\n",
+//    );
+//    assert_eq!(
+//        solve_part2_bf(example).expect("example should have solution"),
+//        29
+//    );
+//}
 
 fn main() {
     let input = str::from_utf8(include_bytes!("input.txt")).expect("valid input");
