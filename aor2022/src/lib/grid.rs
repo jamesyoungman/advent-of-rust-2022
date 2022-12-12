@@ -72,6 +72,24 @@ impl Position {
             },
         }
     }
+
+    pub fn xbearing(&self, to: &Position) -> Result<Option<CompassDirection>, ()> {
+        match self.x - to.x {
+            -1 => Ok(Some(CompassDirection::West)),
+            0 => Ok(None),
+            1 => Ok(Some(CompassDirection::East)),
+            _ => Err(()),
+        }
+    }
+
+    pub fn ybearing(&self, to: &Position) -> Result<Option<CompassDirection>, ()> {
+        match self.y - to.y {
+            -1 => Ok(Some(CompassDirection::North)),
+            0 => Ok(None),
+            1 => Ok(Some(CompassDirection::South)),
+            _ => Err(()),
+        }
+    }
 }
 
 pub fn bounds<'a, I>(points: I) -> Option<(Position, Position)>
