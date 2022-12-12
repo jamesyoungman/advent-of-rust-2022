@@ -7,14 +7,16 @@ use std::str;
 use lib::error::Fail;
 use sscanf::scanf;
 
+type Worry = u64;
+
 #[derive(Debug, Clone)]
 struct Item {
-    worry_level: u32,
+    worry_level: Worry,
 }
 
 impl Item {
-    fn reduce_worry_level(&mut self) {
-        self.worry_level /= 3;
+    fn reduce_worry_level(&mut self, divisor: Worry) {
+        self.worry_level /= divisor;
     }
 
     fn perform_operation(self, op: &Operation) -> Item {
@@ -23,7 +25,7 @@ impl Item {
         }
     }
 
-    fn perform_test(&self, test_divisor: u32) -> bool {
+    fn perform_test(&self, test_divisor: Worry) -> bool {
         self.worry_level % test_divisor == 0
     }
 }
@@ -101,12 +103,68 @@ impl TryFrom<&str> for Operation {
 }
 
 impl Operation {
-    fn perform(&self, worry_level: u32) -> u32 {
+    fn perform(&self, worry_level: Worry) -> Worry {
         match self {
-            Operation::Add(Operand::Number(n)) => worry_level + n,
+            Operation::Add(Operand::Number(n)) => worry_level + Worry::from(*n),
             Operation::Add(Operand::Itself) => worry_level + worry_level,
-            Operation::Multiply(Operand::Number(n)) => worry_level * n,
+            Operation::Multiply(Operand::Number(n)) => worry_level * Worry::from(*n),
             Operation::Multiply(Operand::Itself) => worry_level * worry_level,
+        }
+    }
+}
+
+#[test]
+fn test_operations() {
+    struct Case {
+        input: Worry,
+        operation: &'static str,
+        expect: Worry,
+    }
+    let cases = [
+        Case {
+            input: 8_u32.into(),
+            operation: "new = old + 2",
+            expect: 10_u32.into(),
+        },
+        Case {
+            input: 2_u32.into(),
+            operation: "new = old * 3",
+            expect: 6_u32.into(),
+        },
+        Case {
+            input: 5_u32.into(),
+            operation: "new = old * old",
+            expect: 25_u32.into(),
+        },
+        Case {
+            input: 7_u32.into(),
+            operation: "new = old + old",
+            expect: 14_u32.into(),
+        },
+    ];
+    for test_case in cases.iter() {
+        let op = match Operation::try_from(test_case.operation) {
+            Ok(v) => v,
+            Err(e) => {
+                panic!("failed to parse operation {}: {e}", test_case.operation);
+            }
+        };
+        let result = op.perform(test_case.input);
+        assert_eq!(result, test_case.expect);
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum Part {
+    One,
+    Two,
+}
+
+impl Part {
+    fn iterations(&self) -> usize {
+        match self {
+            Part::One => 20,
+            Part::Two => 10_000,
         }
     }
 }
@@ -123,29 +181,47 @@ struct Monkey {
 }
 
 impl Monkey {
-    fn inspect_items(&mut self) -> Vec<(Item, u32)> {
-        let mut result = Vec::with_capacity(self.items.len());
+    fn inspect_items(&mut self, verbose: bool, part: &Part, modulus: Worry) -> Vec<(Item, u32)> {
+        let mut result: Vec<(Item, u32)> = Vec::with_capacity(self.items.len());
         for item in self.items.drain(..) {
-            println!(
-                "Monkey inspects an item with a worry level of {}",
-                item.worry_level
-            );
+            if verbose {
+                println!(
+                    "Monkey inspects an item with a worry level of {}",
+                    item.worry_level
+                );
+            }
             let mut item = item.perform_operation(&self.operation);
-            println!("  Worry level is updated to {}", item.worry_level);
-            item.reduce_worry_level();
-            println!(
-                "  Monkey gets bored with item.  Worry level is divided by 3 to {}.",
-                item.worry_level
-            );
-            let next_monkey: u32 = if item.perform_test(self.test_divisor) {
+            if verbose {
+                println!("  Worry level is updated to {}", item.worry_level);
+            }
+            match part {
+                Part::One => {
+                    item.reduce_worry_level(3);
+                    if verbose {
+                        println!(
+                            "  Monkey gets bored with item.  Worry level is divided by 3 to {}.",
+                            item.worry_level
+                        );
+                    }
+                }
+                Part::Two => {
+                    if verbose {
+                        println!("  Monkey gets bored with item.");
+                    }
+                }
+            }
+            let next_monkey: u32 = if item.perform_test(self.test_divisor.into()) {
                 self.if_true
             } else {
                 self.if_false
             };
-            println!(
-                "  Item with worry level {} is thorwn to monkey {}.",
-                item.worry_level, next_monkey
-            );
+            item.worry_level %= modulus;
+            if verbose {
+                println!(
+                    "  Item with worry level {} is thorwn to monkey {}.",
+                    item.worry_level, next_monkey
+                );
+            }
             result.push((item, next_monkey));
             self.inspection_count += 1;
         }
@@ -171,17 +247,25 @@ fn show_round_result(round_number: usize, monkeys: &mut BTreeMap<u32, Monkey>) {
     }
 }
 
-fn inspect_items_round(round_number: usize, monkeys: &mut BTreeMap<u32, Monkey>) {
+fn inspect_items_round(
+    part: &Part,
+    verbose: bool,
+    round_number: usize,
+    monkeys: &mut BTreeMap<u32, Monkey>,
+    modulus: Worry,
+) {
     // items_in_the_air holds the items to be caught by each monkey,
     // in the order they must be caught.
     let mut items_in_the_air: BTreeMap<u32, Vec<Item>> = BTreeMap::new();
     for (id, monkey) in monkeys.iter_mut() {
-        println!("Monkey {id}:");
+        if verbose {
+            println!("Monkey {id}:");
+        }
         assert_eq!(*id, monkey.id);
         if let Some(items) = items_in_the_air.remove(id) {
             monkey.catch_items(items);
         }
-        for (item, to_monkey) in monkey.inspect_items() {
+        for (item, to_monkey) in monkey.inspect_items(verbose, part, modulus) {
             items_in_the_air
                 .entry(to_monkey)
                 .and_modify(|v| v.push(item.clone()))
@@ -195,7 +279,9 @@ fn inspect_items_round(round_number: usize, monkeys: &mut BTreeMap<u32, Monkey>)
             panic!("Item was thrown to nonexistent monkey {to_monkey}");
         }
     }
-    show_round_result(round_number, monkeys);
+    if verbose {
+        show_round_result(round_number, monkeys);
+    }
 }
 
 fn write_list<I, T>(f: &mut Formatter, items: I) -> Result<(), std::fmt::Error>
@@ -225,8 +311,8 @@ impl Display for Monkey {
                 "\n",
                 "  Operation: {}\n",
                 "  Test: divisible by {}\n",
-                "  If true: throw to monkey {}\n",
-                "  If false: throw to monkey {}\n"
+                "    If true: throw to monkey {}\n",
+                "    If false: throw to monkey {}\n"
             ),
             self.operation, self.test_divisor, self.if_true, self.if_false
         )
@@ -274,7 +360,7 @@ impl TryFrom<&str> for Monkey {
             }
         };
         let test_divisor = match scanf!(lines[3], "  Test: divisible by {u32}") {
-            Ok(n) => n,
+            Ok(n) => n.into(),
             Err(e) => {
                 return Err(fail(lines[3], &format!("expected test: {e}")));
             }
@@ -291,7 +377,7 @@ impl TryFrom<&str> for Monkey {
                 return Err(fail(lines[5], "expected 'If false'"));
             }
         };
-        Ok(Monkey {
+        let result = Monkey {
             id,
             items,
             operation,
@@ -299,7 +385,9 @@ impl TryFrom<&str> for Monkey {
             if_true,
             if_false,
             inspection_count: 0,
-        })
+        };
+        assert_eq!(s.trim(), format!("{result}").trim());
+        Ok(result)
     }
 }
 
@@ -319,19 +407,49 @@ fn example() -> String {
     text.to_string()
 }
 
-fn solve_part1(monkeys: &mut BTreeMap<u32, Monkey>) -> usize {
-    for round in 1..=20 {
-        inspect_items_round(round, monkeys);
-    }
-    let mut counts: Vec<usize> = monkeys
-        .iter()
-        .map(|(id, m)| {
-            println!("Monkey {id} inspected items {} times.", m.inspection_count);
+fn show_inspection_counts(round: usize, monkeys: &mut BTreeMap<u32, Monkey>) {
+    println!("== After round {round} ==");
+    monkeys.iter().for_each(|(id, m)| {
+        println!(
+            "Monkey {id} inspected items {:>6} times.",
             m.inspection_count
-        })
-        .collect();
+        );
+    })
+}
+
+fn solve(part: &Part, verbose: bool, monkeys: &mut BTreeMap<u32, Monkey>) -> usize {
+    let modulus: Worry = monkeys
+        .iter()
+        .map(|(_, monkey)| Worry::from(monkey.test_divisor))
+        .product();
+    println!("modulus is {modulus}");
+    for round in 1..=part.iterations() {
+        inspect_items_round(part, verbose, round, monkeys, modulus);
+        if [0, 1, 20_usize, 3000, 10_000]
+            .iter()
+            .any(|n: &usize| *n == round)
+        {
+            show_inspection_counts(round, monkeys);
+        }
+    }
+    let mut counts: Vec<usize> = monkeys.iter().map(|(_, m)| m.inspection_count).collect();
     counts.sort();
-    counts.iter().rev().take(2).product()
+    counts
+        .iter()
+        .rev()
+        .take(2)
+        .inspect(|c| {
+            println!("top-two monkey: count is {}", c);
+        })
+        .product()
+}
+
+fn solve_part1(monkeys: &mut BTreeMap<u32, Monkey>) -> usize {
+    solve(&Part::One, false, monkeys)
+}
+
+fn solve_part2(monkeys: &mut BTreeMap<u32, Monkey>) -> usize {
+    solve(&Part::Two, false, monkeys)
 }
 
 #[test]
@@ -344,8 +462,20 @@ fn test_part1_example() {
     assert_eq!(solve_part1(&mut monkeys), 10605);
 }
 
+#[test]
+fn test_part2_example() {
+    let mut monkeys = parse_monkeys(&example()).expect("example should be valid");
+    assert_eq!(monkeys.len(), 4);
+    for (_, monkey) in monkeys.iter() {
+        println!("{monkey}");
+    }
+    assert_eq!(solve_part2(&mut monkeys), 2713310158);
+}
+
 fn main() {
     let input = str::from_utf8(include_bytes!("input.txt")).expect("valid input");
     let mut monkeys = parse_monkeys(input).expect("input should be valid");
     println!("Day 11 part 1: {}", solve_part1(&mut monkeys));
+    let mut monkeys = parse_monkeys(input).expect("input should be valid");
+    println!("Day 11 part 2: {}", solve_part2(&mut monkeys));
 }
