@@ -9,7 +9,7 @@ use lib::error::Fail;
 #[derive(Debug)]
 enum Value {
     Integer(u32),
-    List(Vec<Box<Value>>),
+    List(Vec<Value>),
 }
 
 impl Display for Value {
@@ -34,17 +34,11 @@ impl Display for Value {
 fn test_display() {
     assert_eq!(format!("{}", Value::Integer(2)), "2");
     assert_eq!(format!("{}", Value::List(vec![])), "[]");
-    assert_eq!(
-        format!("{}", Value::List(vec![Box::new(Value::Integer(3))])),
-        "[3]"
-    );
+    assert_eq!(format!("{}", Value::List(vec![Value::Integer(3)])), "[3]");
     assert_eq!(
         format!(
             "{}",
-            Value::List(vec![
-                Box::new(Value::Integer(3)),
-                Box::new(Value::Integer(12)),
-            ])
+            Value::List(vec![Value::Integer(3), Value::Integer(12),])
         ),
         "[3,12]"
     );
@@ -52,11 +46,8 @@ fn test_display() {
         format!(
             "{}",
             Value::List(vec![
-                Box::new(Value::Integer(3)),
-                Box::new(Value::List(vec![
-                    Box::new(Value::Integer(21)),
-                    Box::new(Value::Integer(6)),
-                ])),
+                Value::Integer(3),
+                Value::List(vec![Value::Integer(21), Value::Integer(6),]),
             ])
         ),
         "[3,[21,6]]"
@@ -113,7 +104,7 @@ fn test_parse_integer() {
     assert!(parse_integer("x").is_err());
 }
 
-fn parse_list_body(mut s: &str) -> Result<(Vec<Box<Value>>, &str), Fail> {
+fn parse_list_body(mut s: &str) -> Result<(Vec<Value>, &str), Fail> {
     // parse zero or more values separated by commas.
     // example: 1,2,3
     // example: [],[],[]
@@ -125,7 +116,7 @@ fn parse_list_body(mut s: &str) -> Result<(Vec<Box<Value>>, &str), Fail> {
             }
             None => {
                 let (val, rest) = parse_value(s)?;
-                result.push(Box::new(val));
+                result.push(val);
                 s = rest;
                 match s.strip_prefix(',') {
                     Some(tail) => {
@@ -141,20 +132,11 @@ fn parse_list_body(mut s: &str) -> Result<(Vec<Box<Value>>, &str), Fail> {
 #[test]
 fn test_parse_list_body() {
     assert_eq!(parse_list_body("]"), Ok((vec![], "]")));
-    assert_eq!(
-        parse_list_body("2]"),
-        Ok((vec![Box::new(Value::Integer(2))], "]"))
-    );
-    assert_eq!(
-        parse_list_body("[]]"),
-        Ok((vec![Box::new(Value::List(vec![]))], "]"))
-    );
+    assert_eq!(parse_list_body("2]"), Ok((vec![Value::Integer(2)], "]")));
+    assert_eq!(parse_list_body("[]]"), Ok((vec![Value::List(vec![])], "]")));
     assert_eq!(
         parse_list_body("[[]]]"),
-        Ok((
-            vec![Box::new(Value::List(vec![Box::new(Value::List(vec![]))]))],
-            "]"
-        ))
+        Ok((vec![Value::List(vec![Value::List(vec![])])], "]"))
     );
 }
 
@@ -190,7 +172,7 @@ fn test_parse_value() {
     assert_eq!(parse_value("[]"), Ok((Value::List(vec![]), "")));
     assert_eq!(
         parse_value("[2]"),
-        Ok((Value::List(vec![Box::new(Value::Integer(2))]), ""))
+        Ok((Value::List(vec![Value::Integer(2)]), ""))
     );
 }
 
@@ -249,12 +231,12 @@ impl TryFrom<&str> for Value {
 }
 
 fn listify(n: u32) -> Value {
-    Value::List(vec![Box::new(Value::Integer(n))])
+    Value::List(vec![Value::Integer(n)])
 }
 
-fn compare_items(left: &[Box<Value>], right: &[Box<Value>]) -> Ordering {
+fn compare_items(left: &[Value], right: &[Value]) -> Ordering {
     match (left, right) {
-        ([l, ls @ ..], [r, rs @ ..]) => match compare_values(&*l, &*r) {
+        ([l, ls @ ..], [r, rs @ ..]) => match compare_values(l, r) {
             Ordering::Equal => compare_items(ls, rs),
             other => other,
         },
@@ -436,6 +418,6 @@ fn main() {
     );
     println!(
         "Day 13 part 2: {}",
-        solve_part2(input).expect("failed to solve part 1")
+        solve_part2(input).expect("failed to solve part 2")
     );
 }
