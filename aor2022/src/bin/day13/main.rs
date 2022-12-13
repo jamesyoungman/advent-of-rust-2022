@@ -353,7 +353,7 @@ fn example() -> &'static str {
     )
 }
 
-fn parse_input(s: &str) -> Result<Vec<(Value, Value)>, Fail> {
+fn parse_input_for_part1(s: &str) -> Result<Vec<(Value, Value)>, Fail> {
     let mut result = Vec::new();
     for chunk in s.split("\n\n").filter(|chunk| !chunk.is_empty()) {
         let items: Vec<&str> = chunk.split('\n').filter(|item| !item.is_empty()).collect();
@@ -374,8 +374,16 @@ fn parse_input(s: &str) -> Result<Vec<(Value, Value)>, Fail> {
     Ok(result)
 }
 
+fn parse_input_for_part2(s: &str) -> Result<Vec<Value>, Fail> {
+    let mut result = Vec::new();
+    for chunk in s.split("\n").filter(|chunk| !chunk.is_empty()) {
+        result.push(Value::try_from(chunk)?);
+    }
+    Ok(result)
+}
+
 fn solve_part1(s: &str) -> Result<usize, Fail> {
-    let items: Vec<(Value, Value)> = parse_input(s)?;
+    let items: Vec<(Value, Value)> = parse_input_for_part1(s)?;
     Ok(items
         .iter()
         .enumerate()
@@ -390,9 +398,40 @@ fn test_solve_part1() {
 }
 
 #[test]
-fn test_parse_input() {
-    let items = parse_input(example()).expect("example should be valid");
+fn test_parse_input_for_part1() {
+    let items = parse_input_for_part1(example()).expect("example should be valid");
     assert_eq!(8, items.len());
+}
+
+#[test]
+fn test_parse_input_for_part2() {
+    let items = parse_input_for_part2(example()).expect("example should be valid");
+    assert_eq!(16, items.len());
+}
+
+fn solve_part2(s: &str) -> Result<usize, Fail> {
+    let input_with_dividers = format!("{}\n[[2]]\n[[6]]\n", s);
+    let mut items = parse_input_for_part2(&input_with_dividers).expect("example should be valid");
+    items.sort();
+    let start = Value::try_from("[[2]]")?;
+    let end = Value::try_from("[[6]]")?;
+    Ok(items
+        .iter()
+        .enumerate()
+        .map(|(i, item)| (i + 1, item))
+        .filter_map(|(i, item)| {
+            if item == &start || item == &end {
+                Some(i)
+            } else {
+                None
+            }
+        })
+        .product())
+}
+
+#[test]
+fn test_solve_part2() {
+    assert_eq!(solve_part2(example()), Ok(140));
 }
 
 fn main() {
@@ -400,5 +439,9 @@ fn main() {
     println!(
         "Day 13 part 1: {}",
         solve_part1(input).expect("failed to solve part 1")
+    );
+    println!(
+        "Day 13 part 2: {}",
+        solve_part2(input).expect("failed to solve part 1")
     );
 }
