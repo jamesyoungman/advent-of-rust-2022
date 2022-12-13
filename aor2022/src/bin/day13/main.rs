@@ -118,11 +118,8 @@ fn parse_list_body(mut s: &str) -> Result<(Vec<Value>, &str), Fail> {
                 let (val, rest) = parse_value(s)?;
                 result.push(val);
                 s = rest;
-                match s.strip_prefix(',') {
-                    Some(tail) => {
-                        s = tail; // loop again
-                    }
-                    None => (), // no more items.
+                if let Some(tail) = s.strip_prefix(',') {
+                    s = tail; // loop again
                 }
             }
         }
@@ -250,7 +247,7 @@ fn compare_values(left: &Value, right: &Value) -> Ordering {
     match (left, right) {
         (Value::Integer(a), Value::Integer(b)) => a.cmp(b),
         (Value::List(left_items), Value::List(right_items)) => {
-            compare_items(&left_items, &right_items)
+            compare_items(left_items, right_items)
         }
         (Value::List(_), Value::Integer(n)) => compare_values(left, &listify(*n)),
         (Value::Integer(n), Value::List(_)) => compare_values(&listify(*n), right),
@@ -351,20 +348,17 @@ fn parse_input_for_part1(s: &str) -> Result<Vec<(Value, Value)>, Fail> {
 }
 
 fn parse_input_for_part2(s: &str) -> Result<Vec<Value>, Fail> {
-    let mut result = Vec::new();
-    for chunk in s.split("\n").filter(|chunk| !chunk.is_empty()) {
-        result.push(Value::try_from(chunk)?);
-    }
-    Ok(result)
+    s.split('\n')
+        .filter(|chunk| !chunk.is_empty())
+        .map(Value::try_from)
+        .collect()
 }
 
 fn solve_part1(s: &str) -> Result<usize, Fail> {
-    let items: Vec<(Value, Value)> = parse_input_for_part1(s)?;
-    Ok(items
+    Ok(parse_input_for_part1(s)?
         .iter()
         .enumerate()
-        .map(|(i, (a, b))| (i + 1, (a, b)))
-        .filter_map(|(i, (a, b))| if a < b { Some(i) } else { None })
+        .filter_map(|(i, (a, b))| if a < b { Some(i + 1) } else { None })
         .sum())
 }
 
@@ -394,10 +388,9 @@ fn solve_part2(s: &str) -> Result<usize, Fail> {
     Ok(items
         .iter()
         .enumerate()
-        .map(|(i, item)| (i + 1, item))
         .filter_map(|(i, item)| {
             if item == &start || item == &end {
-                Some(i)
+                Some(i + 1)
             } else {
                 None
             }
