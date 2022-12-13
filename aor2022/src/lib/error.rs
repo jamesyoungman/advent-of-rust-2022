@@ -1,7 +1,7 @@
 use std::fmt::{self, Display, Formatter};
 
 /// Generic error type for when a typed error isn't useful.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Fail(pub String);
 
 impl Display for Fail {
