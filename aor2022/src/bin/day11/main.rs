@@ -360,7 +360,7 @@ impl TryFrom<&str> for Monkey {
             }
         };
         let test_divisor = match scanf!(lines[3], "  Test: divisible by {u32}") {
-            Ok(n) => n.into(),
+            Ok(n) => n,
             Err(e) => {
                 return Err(fail(lines[3], &format!("expected test: {e}")));
             }
