@@ -131,10 +131,7 @@ fn parse_list_body(mut s: &str) -> Result<(Vec<Box<Value>>, &str), Fail> {
                     Some(tail) => {
                         s = tail; // loop again
                     }
-                    None => {
-                        // no more items.
-                        println!("after value: {s}");
-                    }
+                    None => (), // no more items.
                 }
             }
         }
@@ -173,10 +170,8 @@ fn parse_value(s: &str) -> Result<(Value, &str), Fail> {
             }
         }
         Some(tail) => {
-            println!("parse_value: tail is {tail}");
             match parse_list_body(tail) {
                 Ok((items, t)) => {
-                    println!("parse_list_body({tail}) succeeded, leaving tail '{t}'");
                     // check for ]
                     match t.strip_prefix(']') {
                         Some(tt) => Ok((Value::List(items), tt)),
@@ -258,7 +253,6 @@ fn listify(n: u32) -> Value {
 }
 
 fn compare_items(left: &[Box<Value>], right: &[Box<Value>]) -> Ordering {
-    println!("compare_items: comparing {left:?} to {right:?}");
     match (left, right) {
         ([l, ls @ ..], [r, rs @ ..]) => match compare_values(&*l, &*r) {
             Ordering::Equal => compare_items(ls, rs),
