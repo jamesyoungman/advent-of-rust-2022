@@ -7,6 +7,21 @@ use std::{
 use lib::error::Fail;
 use lib::grid::{bounds, update_max, update_min, Position};
 
+#[derive(Debug, PartialEq, Eq)]
+enum Part {
+    One,
+    Two,
+}
+
+impl Display for Part {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        match self {
+            Part::One => f.write_str("1"),
+            Part::Two => f.write_str("2"),
+        }
+    }
+}
+
 #[derive(Debug)]
 enum Fall {
     Down,
@@ -19,10 +34,14 @@ struct Cave {
     structures: HashSet<Position>,
     sand: HashSet<Position>,
     source: Position,
+    floor_level: i64,
 }
 
 impl Cave {
-    fn sand_move(&self, pos: &Position) -> (Option<Fall>, Position) {
+    fn sand_move(&self, rule: &Part, pos: &Position) -> (Option<Fall>, Position) {
+        if *rule == Part::Two && pos.y + 1 == self.floor_level {
+            return (None, *pos); // at rest on the floor
+        }
         for possible_move in [Fall::Down, Fall::DownLeft, Fall::DownRight] {
             let next_pos = match possible_move {
                 Fall::Down => Position {
@@ -159,15 +178,20 @@ impl TryFrom<&str> for Cave {
             let mut structure = parse_structure(line)?;
             structures.extend(structure.drain());
         }
+        let floor_level = match bounds(structures.iter()) {
+            Some((_, bottom_right)) => bottom_right.y + 2,
+            None => return Err(Fail("cave contains no structures".to_string())),
+        };
         Ok(Cave {
             structures,
             sand: HashSet::new(),
             source: Position { x: 500, y: 0 },
+            floor_level,
         })
     }
 }
 
-fn solve1(cave: &mut Cave) -> usize {
+fn solve(cave: &mut Cave, part: &Part) -> usize {
     let lowest_y = match bounds(cave.structures.iter()) {
         Some((_, bottom_right)) => bottom_right.y,
         None => {
@@ -178,22 +202,40 @@ fn solve1(cave: &mut Cave) -> usize {
     };
     for sand_units in 1.. {
         let mut pos = Position { x: 500, y: 0 };
-        assert!(
-            cave.sand_move(&pos).0.is_some(),
-            "entry point should not itself be blocked",
-        );
+        if cave.sand.contains(&pos) {
+            assert!(*part == Part::Two);
+            println!("Source is blocked, cannot introduce sand particle {sand_units}");
+            return sand_units - 1;
+        }
+        match part {
+            Part::One => {
+                assert!(
+                    cave.sand_move(part, &pos).0.is_some(),
+                    "entry point should not itself be blocked",
+                );
+            }
+            Part::Two => (),
+        }
         loop {
-            match cave.sand_move(&pos) {
+            match cave.sand_move(part, &pos) {
                 (None, _) => {
-                    println!("Particle {sand_units} came to rest at at {pos}");
+                    //println!("Particle {sand_units} came to rest at at {pos}");
                     cave.sand_stopped_at(pos);
                     break;
                 }
                 (Some(_), newpos) => {
-                    if newpos.y > lowest_y {
-                        // nothing to stop this sand particle.
-                        println!("Particle {sand_units} is in infinite-fall at {newpos}");
-                        return sand_units - 1;
+                    match part {
+                        Part::One => {
+                            if newpos.y > lowest_y {
+                                // nothing to stop this sand particle.
+                                println!("Particle {sand_units} is in infinite-fall at {newpos}");
+                                return sand_units - 1;
+                            }
+                        }
+                        Part::Two => {
+                            // The floor is already handled by sand_move.
+                            assert!(pos.y < cave.floor_level);
+                        }
                     }
                     pos = newpos;
                 }
@@ -214,13 +256,22 @@ fn example() -> &'static str {
 #[test]
 fn test_day14_part1_example() {
     let mut cave = Cave::try_from(example()).expect("example should be valid");
-    assert_eq!(solve1(&mut cave), 24);
+    assert_eq!(solve(&mut cave, &Part::One), 24);
+}
+
+#[test]
+fn test_day14_part2_example() {
+    let mut cave = Cave::try_from(example()).expect("example should be valid");
+    assert_eq!(solve(&mut cave, &Part::Two), 93);
 }
 
 fn main() {
     let input = str::from_utf8(include_bytes!("input.txt")).expect("valid input");
-    let mut cave = Cave::try_from(input).expect("example should be valid");
-    let part1 = solve1(&mut cave);
-    println!("{cave}\n");
-    println!("Day 14 part 1: {part1}");
+
+    for part in [Part::One, Part::Two] {
+        let mut cave = Cave::try_from(input).expect("example should be valid");
+        let solution = solve(&mut cave, &part);
+        println!("{cave}\n");
+        println!("Day 14 part {part}: {solution}");
+    }
 }
