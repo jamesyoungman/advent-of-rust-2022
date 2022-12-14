@@ -98,6 +98,38 @@ impl Position {
     }
 }
 
+pub fn maybe_update_min(min: &mut Option<i64>, val: i64) {
+    match min {
+        None => {
+            *min = Some(val);
+        }
+        Some(v) if *v > val => *min = Some(val),
+        Some(_) => (),
+    }
+}
+
+pub fn maybe_update_max(max: &mut Option<i64>, val: i64) {
+    match max {
+        None => {
+            *max = Some(val);
+        }
+        Some(v) if *v < val => *max = Some(val),
+        Some(_) => (),
+    }
+}
+
+pub fn update_min(min: &mut i64, val: i64) {
+    if val < *min {
+        *min = val;
+    }
+}
+
+pub fn update_max(max: &mut i64, val: i64) {
+    if val > *max {
+        *max = val;
+    }
+}
+
 pub fn bounds<'a, I>(points: I) -> Option<(Position, Position)>
 where
     I: IntoIterator<Item = &'a Position>,
@@ -106,24 +138,6 @@ where
     let mut max_x: Option<i64> = None;
     let mut min_y: Option<i64> = None;
     let mut max_y: Option<i64> = None;
-    fn maybe_update_min(min: &mut Option<i64>, val: i64) {
-        match min {
-            None => {
-                *min = Some(val);
-            }
-            Some(v) if *v > val => *min = Some(val),
-            Some(_) => (),
-        }
-    }
-    fn maybe_update_max(max: &mut Option<i64>, val: i64) {
-        match max {
-            None => {
-                *max = Some(val);
-            }
-            Some(v) if *v < val => *max = Some(val),
-            Some(_) => (),
-        }
-    }
     for p in points.into_iter() {
         maybe_update_min(&mut min_x, p.x);
         maybe_update_max(&mut max_x, p.x);
