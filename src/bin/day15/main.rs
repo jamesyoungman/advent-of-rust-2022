@@ -3,7 +3,7 @@ use std::ops::Range;
 use std::str;
 
 use gcollections::ops::cardinality::Cardinality;
-use gcollections::ops::set::Difference;
+use gcollections::ops::{set::Difference, Bounded};
 use interval::interval::Interval;
 use interval::interval_set::*;
 
@@ -49,12 +49,8 @@ fn parse_input(s: &str) -> Result<Vec<Sensor>, Fail> {
 }
 
 impl Sensor {
-    fn manhattan(&self) -> i64 {
-        manhattan(&self.pos, &self.closest_beacon)
-    }
-
     fn scan_y(&self, y: i64) -> Option<Range<i64>> {
-        let m = self.manhattan();
+        let m = manhattan(&self.pos, &self.closest_beacon);
         let d = (self.pos.y - y).abs();
         if d > m {
             None
@@ -94,13 +90,7 @@ fn exclude_beacons(segments: &mut IntervalSet<i64>, beacons: &[i64]) {
 }
 
 fn solve_part1(s: &str, y: i64) -> Result<usize, Fail> {
-    let keep_if_on_scanline = |pos: &Position| {
-        if pos.y == y {
-            true
-        } else {
-            false
-        }
-    };
+    let keep_if_on_scanline = |pos: &Position| pos.y == y;
     let sensors: Vec<Sensor> = parse_input(s)?;
     let mut segments: IntervalSet<i64> = scan_all_sensors(y, sensors.as_slice());
     let beacons: Vec<i64> = sensors
@@ -109,9 +99,7 @@ fn solve_part1(s: &str, y: i64) -> Result<usize, Fail> {
         .filter(keep_if_on_scanline)
         .map(|pos| pos.x)
         .collect();
-    dbg!(&beacons);
     exclude_beacons(&mut segments, &beacons);
-    dbg!(&segments);
     Ok(segments
         .iter()
         .map(|interval: &Interval<i64>| {
@@ -119,6 +107,36 @@ fn solve_part1(s: &str, y: i64) -> Result<usize, Fail> {
             n
         })
         .sum())
+}
+
+fn part2_locate_missing_beacon(s: &str, limit: i64) -> Result<Position, Fail> {
+    let full_width: IntervalSet<i64> = vec![(0, limit)].to_interval_set();
+    let sensors: Vec<Sensor> = parse_input(s)?;
+    let mut candidates: Vec<Position> = Vec::with_capacity(1);
+    for y in 0..=limit {
+        let segments: IntervalSet<i64> = scan_all_sensors(y, sensors.as_slice());
+        let gap = full_width.difference(&segments);
+        candidates.extend(gap.iter().filter_map(|g| {
+            let (l, u) = (g.lower(), g.upper());
+            if l == u {
+                Some(Position { x: u, y })
+            } else {
+                None
+            }
+        }))
+    }
+    match candidates.as_slice() {
+        [] => Err(Fail("found no gap".to_string())),
+        [only] => Ok(*only),
+        _ => Err(Fail(format!(
+            "found multiple solutions for part 2: {candidates:?}"
+        ))),
+    }
+}
+
+fn solve_part2(s: &str, limit: i64) -> Result<i64, Fail> {
+    const FOUR_MILLION: i64 = 4_000_000;
+    part2_locate_missing_beacon(s, limit).map(|pos| pos.x * FOUR_MILLION + pos.y)
 }
 
 #[cfg(test)]
@@ -148,10 +166,19 @@ fn test_example_part1() {
     assert_eq!(solve_part1(example(), 11), Ok(28));
 }
 
+#[test]
+fn test_example_part2() {
+    assert_eq!(solve_part2(example(), 20), Ok(56000011));
+}
+
 fn main() {
     let input = str::from_utf8(include_bytes!("input.txt")).expect("valid input");
     println!(
         "Day 15 part 1: {}",
         solve_part1(input, 2_000_000).expect("solve part 1")
+    );
+    println!(
+        "Day 15 part 2: {}",
+        solve_part2(input, 4_000_000).expect("solve part 2")
     );
 }
