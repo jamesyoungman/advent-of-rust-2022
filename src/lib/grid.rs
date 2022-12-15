@@ -153,3 +153,17 @@ where
         _ => None,
     }
 }
+
+pub fn manhattan(a: &Position, b: &Position) -> i64 {
+    let dx = (a.x - b.x).abs();
+    let dy = (a.y - b.y).abs();
+    dx + dy
+}
+
+#[test]
+fn test_manhattan() {
+    assert_eq!(
+        manhattan(&Position { x: 1, y: -2 }, &Position { x: 12, y: 7 }),
+        11 + 9
+    );
+}
