@@ -7,6 +7,42 @@ use sscanf::scanf;
 use lib::error::Fail;
 
 #[derive(Debug, Eq, PartialEq, Hash, Clone, Copy)]
+enum Verbosity {
+    None,
+    High,
+}
+
+#[derive(Debug, Eq, PartialEq, Hash, Clone, Copy, Ord, PartialOrd)]
+struct FlowRate(u32);
+
+impl FlowRate {
+    fn checked_add(&self, other: FlowRate) -> Option<FlowRate> {
+        self.0.checked_add(other.0).map(|n| FlowRate(n))
+    }
+}
+
+impl Display for FlowRate {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Hash, Clone, Copy)]
+struct Minutes(u32);
+
+impl Display for Minutes {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl Minutes {
+    fn checked_sub(&self, other: Minutes) -> Option<Minutes> {
+        self.0.checked_sub(other.0).map(|n| Minutes(n))
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Hash, Clone, Copy)]
 struct ValveName(char, char);
 
 impl TryFrom<&str> for ValveName {
@@ -45,8 +81,8 @@ impl Display for ValveId {
 
 #[derive(Debug)]
 struct Valve {
-    flow_rate: u32,
-    neighbours: Vec<ValveId>,
+    flow_rate: FlowRate,
+    neighbours: HashMap<ValveId, Minutes>,
 }
 
 #[derive(Debug)]
@@ -103,7 +139,7 @@ impl Network {
                 },
             }
 
-            for n in valve.neighbours.iter() {
+            for n in valve.neighbours.keys() {
                 match self.valves.get(n) {
                     None => {
                         panic!(
@@ -129,10 +165,6 @@ impl Network {
             },
         )
     }
-
-    fn flow_rate(&self, location: &ValveId) -> u32 {
-        self.valves[location].flow_rate
-    }
 }
 
 impl TryFrom<&str> for Network {
@@ -142,24 +174,24 @@ impl TryFrom<&str> for Network {
             fn ingest_valve(
                 nw: &mut Network,
                 name: &str,
-                flow_rate: u32,
+                flow_rate: FlowRate,
                 neighbour_names: &str,
             ) -> Result<(), Fail> {
                 let neighbour_names: &str = match scanf!(neighbour_names, "valve {str}") {
                     Ok(name) => name,
                     Err(_) => match scanf!(neighbour_names, "valves {str}") {
                         Ok(names) => names,
-                        Err(e) => {
+                        Err(_) => {
                             return Err(Fail(format!(
                                 "cannot parse neighbour list {neighbour_names}"
                             )));
                         }
                     },
                 };
-                let neighbours: Vec<ValveId> = neighbour_names
+                let neighbours: HashMap<ValveId, Minutes> = neighbour_names
                     .split(", ")
-                    .map(|s| nw.find_or_add_name_str(s))
-                    .collect::<Result<Vec<ValveId>, Fail>>()?;
+                    .map(|s| (nw.find_or_add_name_str(s).map(|id| (id, Minutes(1)))))
+                    .collect::<Result<HashMap<ValveId, Minutes>, Fail>>()?;
                 let id = nw.find_or_add_name_str(name)?;
                 nw.valves.insert(
                     id,
@@ -173,11 +205,11 @@ impl TryFrom<&str> for Network {
             if let Ok((name, flow_rate, neighbour_names)) =
                 scanf!(s, "Valve {str} has flow rate={u32}; tunnels lead to {str}")
             {
-                ingest_valve(nw, name, flow_rate, neighbour_names)
+                ingest_valve(nw, name, FlowRate(flow_rate), neighbour_names)
             } else if let Ok((name, flow_rate, neighbour_names)) =
                 scanf!(s, "Valve {str} has flow rate={u32}; tunnel leads to {str}")
             {
-                ingest_valve(nw, name, flow_rate, neighbour_names)
+                ingest_valve(nw, name, FlowRate(flow_rate), neighbour_names)
             } else {
                 Err(Fail(format!("cannot parse input line {}", s)))
             }
@@ -202,7 +234,7 @@ impl Default for Network {
     }
 }
 
-//#[cfg(test)]
+#[cfg(test)]
 fn example() -> &'static str {
     concat!(
         "Valve AA has flow rate=0; tunnels lead to valves DD, II, BB\n",
@@ -235,8 +267,8 @@ fn test_parse_example() {
         .get(&ValveName('B', 'B'))
         .expect("valve DD should not be missing");
 
-    assert_eq!(network.flow_rate(&aa), 0);
-    assert_eq!(network.flow_rate(&bb), 13);
+    assert_eq!(network.valves[&aa].flow_rate, FlowRate(0));
+    assert_eq!(network.valves[&bb].flow_rate, FlowRate(13));
 }
 
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
@@ -278,10 +310,12 @@ impl NetworkState {
         self.all_valves |= NetworkState::bit(&id)
     }
 
+    #[cfg(test)]
     fn open_valve(&mut self, id: &ValveId) {
         self.open_valves |= NetworkState::bit(id)
     }
 
+    #[cfg(test)]
     fn close_valve(&mut self, id: &ValveId) {
         self.open_valves &= !NetworkState::bit(id)
     }
@@ -294,6 +328,7 @@ impl NetworkState {
         self.open_valves & NetworkState::bit(id) == 0
     }
 
+    #[cfg(test)]
     fn open_valves(&self) -> NetworkStateOpenValveIter {
         NetworkStateOpenValveIter {
             state: self,
@@ -360,13 +395,6 @@ impl State {
         }
     }
 
-    fn with_opened_valve(&self) -> State {
-        State {
-            location: self.location,
-            valves: self.valves.with_opened_valve(&self.location),
-        }
-    }
-
     fn with_move(&self, whence: &ValveId) -> State {
         State {
             location: *whence,
@@ -374,7 +402,7 @@ impl State {
         }
     }
 
-    fn neighbouring_states(&self, network: &Network) -> Vec<(u32, Action, State)> {
+    fn neighbouring_states(&self, network: &Network) -> Vec<(FlowRate, Action, State)> {
         let mut result = Vec::new();
         let valve = &network.valves[&self.location];
         if self.this_valve_is_closed() {
@@ -393,27 +421,27 @@ impl State {
             valve
                 .neighbours
                 .iter()
-                .map(|n| (0, Action::Move(*n), self.with_move(n))),
+                .map(|(n, _cost)| (FlowRate(0), Action::Move(*n), self.with_move(n))),
         );
         result
     }
 }
 
 fn best_action(
-    verbose: bool,
-    total_minutes: u32,
-    minutes_left: u32,
+    verbose: &Verbosity,
+    total_minutes: Minutes,
+    minutes_left: Minutes,
     current: State,
     history: &mut Vec<Option<Action>>,
     network: &Network,
-) -> (u32, Option<Action>, State) {
-    if minutes_left == 0 {
-        return (0, None, current);
+) -> (FlowRate, Option<Action>, State) {
+    if minutes_left == Minutes(0) {
+        return (FlowRate(0), None, current);
     }
 
-    let mut best: Option<(u32, Action, State)> = None;
+    let mut best: Option<(FlowRate, Action, State)> = None;
 
-    let mut consider = |(flow_change, action, newstate): (u32, Action, State)| match best {
+    let mut consider = |(flow_change, action, newstate): (FlowRate, Action, State)| match best {
         None => {
             best = Some((flow_change, action, newstate));
         }
@@ -426,43 +454,35 @@ fn best_action(
         }
     };
 
-    let valve = match network.valves.get(&current.location) {
-        Some(v) => v,
-        None => {
-            dbg!(&current);
-            panic!(
-                "we are in location {} but there is no such valve in the network",
-                current.location.0
-            );
-        }
-    };
     for (flow_delta, action, next_state) in current.neighbouring_states(&network) {
-        let (flow, maybe_action, state) = best_action(
+        let (flow, _maybe_action, state) = best_action(
             verbose,
             total_minutes,
-            minutes_left - 1,
+            minutes_left.checked_sub(Minutes(1)).expect("no underflow"),
             next_state,
             history,
             network,
         );
         history.pop();
-        let total_flow = flow + flow_delta;
+        let total_flow = flow.checked_add(flow_delta).expect("no underflow");
         consider((total_flow, action, state));
     }
     let result = match best {
         None => {
             history.push(None);
-            (0, None, current)
+            (FlowRate(0), None, current)
         }
         Some((flow, action, newstate)) => {
             history.push(Some(action));
             (flow, Some(action), newstate)
         }
     };
-    if verbose {
+    if *verbose == Verbosity::High {
         println!(
             "At minute {} in location {}, best action in state {:b} is {:?} for flow {}",
-            total_minutes - minutes_left,
+            total_minutes
+                .checked_sub(minutes_left)
+                .expect("no underflow"),
             current.location.0,
             current.valves.open_valves,
             result.1,
@@ -495,11 +515,41 @@ fn test_best_action() {
     // 1 minutes remaining: action unimportant, 1 minute of flow at rate 20
     let state = State::new(&nw, &aa);
     let mut history = Vec::new();
-    let (flow, action, _next_state) = best_action(true, 3, 3, state, &mut history, &nw);
+    let (flow, action, _next_state) = best_action(
+        &Verbosity::None,
+        Minutes(3),
+        Minutes(3),
+        state,
+        &mut history,
+        &nw,
+    );
     dbg!(&history);
     assert_eq!(action, Some(Action::Move(dd)));
-    assert_eq!(flow, 20);
+    assert_eq!(flow, FlowRate(20));
 }
+
+//#[test]
+//fn test_part1_example() {
+//    let network = example_network();
+//
+//    let aa: ValveId = *network
+//        .name_to_id
+//        .get(&ValveName('A', 'A'))
+//        .expect("start point AA should not be missing");
+//
+//    let state = State::new(&network, &aa);
+//    let mut history = Vec::new();
+//    let (flow, _action, _next_state) = best_action(
+//        &Verbosity::None,
+//        Minutes(30),
+//        Minutes(30),
+//        state,
+//        &mut history,
+//        &network,
+//    );
+//    dbg!(&history);
+//    assert_eq!(flow, FlowRate(1651));
+//}
 
 fn main() {
     let input = str::from_utf8(include_bytes!("input.txt")).expect("valid input");
@@ -512,7 +562,14 @@ fn main() {
     let mut history = Vec::new();
     println!(
         "{:?}",
-        best_action(false, 30, 16, state, &mut history, &network)
+        best_action(
+            &Verbosity::None,
+            Minutes(30), // total
+            Minutes(16), // to go
+            state,
+            &mut history,
+            &network
+        )
     );
     dbg!(&history);
 }
