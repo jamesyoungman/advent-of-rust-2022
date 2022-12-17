@@ -1,5 +1,5 @@
-use std::collections::HashMap;
-use std::fmt::{Display, Formatter};
+use std::collections::{HashMap, HashSet};
+use std::fmt::{Debug, Display, Formatter};
 use std::str;
 
 use sscanf::scanf;
@@ -12,7 +12,7 @@ enum Verbosity {
     High,
 }
 
-#[derive(Debug, Eq, PartialEq, Hash, Clone, Copy, Ord, PartialOrd)]
+#[derive(Eq, PartialEq, Hash, Clone, Copy, Ord, PartialOrd)]
 struct FlowRate(u32);
 
 impl FlowRate {
@@ -27,7 +27,13 @@ impl Display for FlowRate {
     }
 }
 
-#[derive(Debug, Eq, PartialEq, Hash, Clone, Copy)]
+impl Debug for FlowRate {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Eq, PartialEq, Hash, Clone, Copy)]
 struct Minutes(u32);
 
 impl Display for Minutes {
@@ -36,13 +42,22 @@ impl Display for Minutes {
     }
 }
 
+impl Debug for Minutes {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "{}", self.0)
+    }
+}
+
 impl Minutes {
+    fn checked_add(&self, other: Minutes) -> Option<Minutes> {
+        self.0.checked_add(other.0).map(|n| Minutes(n))
+    }
     fn checked_sub(&self, other: Minutes) -> Option<Minutes> {
         self.0.checked_sub(other.0).map(|n| Minutes(n))
     }
 }
 
-#[derive(Debug, Eq, PartialEq, Hash, Clone, Copy)]
+#[derive(Eq, PartialEq, Hash, Clone, Copy)]
 struct ValveName(char, char);
 
 impl TryFrom<&str> for ValveName {
@@ -64,7 +79,13 @@ impl Display for ValveName {
     }
 }
 
-#[derive(Debug, Eq, PartialEq, Hash, Clone, Copy)]
+impl Debug for ValveName {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "ValveName('{}','{}')", self.0, self.1)
+    }
+}
+
+#[derive(Eq, PartialEq, Hash, Clone, Copy)]
 struct ValveId(u32);
 
 impl From<u32> for ValveId {
@@ -74,6 +95,12 @@ impl From<u32> for ValveId {
 }
 
 impl Display for ValveId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl Debug for ValveId {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(f, "{}", self.0)
     }
@@ -153,6 +180,10 @@ impl Network {
         }
     }
 
+    fn node_count(&self) -> usize {
+        self.valves.len()
+    }
+
     fn initial_state(&self) -> NetworkState {
         self.valves.keys().fold(
             NetworkState {
@@ -164,6 +195,83 @@ impl Network {
                 state
             },
         )
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Hash, Clone, Copy)]
+enum Pruned {
+    No,
+    Yes,
+}
+
+fn prune_zero_flow_valves(input: &Network, start_id: &ValveId) -> (Network, Pruned) {
+    let need_prune =
+        |id: &ValveId, valve: &Valve| -> bool { id != start_id && valve.flow_rate == FlowRate(0) };
+    loop {
+        let mut pruned: HashSet<ValveId> = HashSet::new();
+        let mut name_to_id: HashMap<ValveName, ValveId> = HashMap::new();
+        let mut id_to_name: HashMap<ValveId, ValveName> = HashMap::new();
+        let mut valves: HashMap<ValveId, Valve> = HashMap::new();
+        for (from_id, input_from_valve) in input.valves.iter() {
+            let from_name = input.id_to_name[from_id];
+            let mut output_from_valve = Valve {
+                flow_rate: input_from_valve.flow_rate,
+                neighbours: HashMap::new(),
+            };
+            for (neighbour_id, cost) in input_from_valve.neighbours.iter() {
+                if need_prune(neighbour_id, &input.valves[neighbour_id]) {
+                    println!(
+                        "pruning node {} ({}) (neighbour of {})",
+                        input.id_to_name[neighbour_id], neighbour_id, from_id
+                    );
+                    // we want to omit neighbour_valve from output.
+                    let pruned_neighbour_valve = &input.valves[neighbour_id];
+                    pruned.insert(*neighbour_id);
+                    for (neighbour_neighbour_id, onward_cost) in
+                        pruned_neighbour_valve.neighbours.iter()
+                    {
+                        let total_cost = cost.checked_add(*onward_cost).expect("no overflow");
+                        output_from_valve
+                            .neighbours
+                            .insert(*neighbour_neighbour_id, total_cost);
+                    }
+                } else {
+                    println!(
+                        "not pruning node {} ({}) (neighbour of {})",
+                        input.id_to_name[neighbour_id], neighbour_id, from_id
+                    );
+                    output_from_valve.neighbours.insert(*neighbour_id, *cost);
+                }
+            }
+            name_to_id.insert(from_name, *from_id);
+            id_to_name.insert(*from_id, from_name);
+            valves.insert(*from_id, output_from_valve);
+        }
+        valves.retain(|id, _| !pruned.contains(id));
+        name_to_id.retain(|_, id| valves.contains_key(id));
+        id_to_name.retain(|id, _| valves.contains_key(id));
+        dbg!(&pruned);
+        if true || pruned.is_empty() {
+            // all done.
+            assert!(!valves.iter().any(|(id, valve)| need_prune(id, valve)));
+            let output = Network {
+                name_to_id,
+                id_to_name,
+                valves,
+                next_id: input.next_id,
+            };
+            output.verify_invariant();
+            return (
+                output,
+                if pruned.is_empty() {
+                    Pruned::No
+                } else {
+                    Pruned::Yes
+                },
+            );
+        } else {
+            dbg!(&valves);
+        }
     }
 }
 
@@ -526,6 +634,21 @@ fn test_best_action() {
     dbg!(&history);
     assert_eq!(action, Some(Action::Move(dd)));
     assert_eq!(flow, FlowRate(20));
+}
+
+#[test]
+fn test_prune_zero_flow_valves() {
+    let big_network = example_network();
+    let aa: ValveId = *big_network
+        .name_to_id
+        .get(&ValveName('A', 'A'))
+        .expect("start point AA should not be missing");
+    dbg!(&big_network);
+    let (pruned_network, pruned) = prune_zero_flow_valves(&big_network, &aa);
+    dbg!(&pruned_network);
+    assert_eq!(pruned, Pruned::Yes);
+    assert!(dbg!(pruned_network.node_count()) < dbg!(big_network.node_count()));
+    assert!(false);
 }
 
 //#[test]
