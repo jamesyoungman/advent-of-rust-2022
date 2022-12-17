@@ -14,21 +14,12 @@ struct Shape {
 }
 
 impl Shape {
-    fn low_point(&self, col: usize) -> Option<usize> {
-        self.columns[col]
+    #[cfg(test)]
+    fn popcount(&self) -> usize {
+        self.columns
             .iter()
-            .enumerate()
-            .find(|(_, occupied)| **occupied)
-            .map(|(height, _)| height)
-    }
-
-    fn high_point(&self, col: usize) -> Option<usize> {
-        self.columns[col]
-            .iter()
-            .enumerate()
-            .rev()
-            .find(|(_, occupied)| **occupied)
-            .map(|(height, _)| height)
+            .map(|c| c.iter().filter(|&v| *v).count())
+            .sum()
     }
 
     fn column_occupied(shape: &Shape, col: usize) -> bool {
@@ -101,19 +92,11 @@ const MINUS: Shape = Shape {
 };
 
 #[test]
-fn test_low_point_minus() {
-    assert_eq!(MINUS.low_point(0), Some(0));
-    assert_eq!(MINUS.low_point(1), Some(0));
-    assert_eq!(MINUS.low_point(2), Some(0));
-    assert_eq!(MINUS.low_point(3), Some(0));
-}
-
-#[test]
-fn test_high_point_minus() {
-    assert_eq!(MINUS.high_point(0), Some(0));
-    assert_eq!(MINUS.high_point(1), Some(0));
-    assert_eq!(MINUS.high_point(2), Some(0));
-    assert_eq!(MINUS.high_point(3), Some(0));
+fn test_shape_popcount() {
+    for (shape, expected_count) in [(MINUS, 4), (PLUS, 5), (ANGLE, 5), (PIPE, 4), (SQUARE, 4)] {
+        let got = shape.popcount();
+        assert_eq!(got, expected_count);
+    }
 }
 
 #[test]
@@ -136,22 +119,6 @@ fn test_width_plus() {
     assert_eq!(PLUS.width(), 3);
 }
 
-#[test]
-fn test_low_point_plus() {
-    assert_eq!(PLUS.low_point(0), Some(1));
-    assert_eq!(PLUS.low_point(1), Some(0));
-    assert_eq!(PLUS.low_point(2), Some(1));
-    assert_eq!(PLUS.low_point(3), None);
-}
-
-#[test]
-fn test_high_point_plus() {
-    assert_eq!(PLUS.high_point(0), Some(1));
-    assert_eq!(PLUS.high_point(1), Some(2));
-    assert_eq!(PLUS.high_point(2), Some(1));
-    assert_eq!(PLUS.high_point(3), None);
-}
-
 const ANGLE: Shape = Shape {
     columns: [
         [true, false, false, false],
@@ -165,22 +132,6 @@ const ANGLE: Shape = Shape {
 fn test_width_angle() {
     assert!(Shape::column_occupied(&ANGLE, 0));
     assert_eq!(ANGLE.width(), 3);
-}
-
-#[test]
-fn test_low_point_angle() {
-    assert_eq!(ANGLE.low_point(0), Some(0));
-    assert_eq!(ANGLE.low_point(1), Some(0));
-    assert_eq!(ANGLE.low_point(2), Some(0));
-    assert_eq!(ANGLE.low_point(3), None);
-}
-
-#[test]
-fn test_high_point_angle() {
-    assert_eq!(ANGLE.high_point(0), Some(0));
-    assert_eq!(ANGLE.high_point(1), Some(0));
-    assert_eq!(ANGLE.high_point(2), Some(2));
-    assert_eq!(ANGLE.high_point(3), None);
 }
 
 const PIPE: Shape = Shape {
@@ -198,22 +149,6 @@ fn test_width_pipe() {
     assert_eq!(PIPE.width(), 1);
 }
 
-#[test]
-fn test_low_point_pipe() {
-    assert_eq!(PIPE.low_point(0), Some(0));
-    assert_eq!(PIPE.low_point(1), None);
-    assert_eq!(PIPE.low_point(2), None);
-    assert_eq!(PIPE.low_point(3), None);
-}
-
-#[test]
-fn test_high_point_pipe() {
-    assert_eq!(PIPE.high_point(0), Some(3));
-    assert_eq!(PIPE.high_point(1), None);
-    assert_eq!(PIPE.high_point(2), None);
-    assert_eq!(PIPE.high_point(3), None);
-}
-
 const SQUARE: Shape = Shape {
     columns: [
         [true, true, false, false],
@@ -229,21 +164,6 @@ fn test_width_square() {
     assert_eq!(SQUARE.width(), 2);
 }
 
-#[test]
-fn test_low_point_square() {
-    assert_eq!(SQUARE.low_point(0), Some(0));
-    assert_eq!(SQUARE.low_point(1), Some(0));
-    assert_eq!(SQUARE.low_point(2), None);
-    assert_eq!(SQUARE.low_point(3), None);
-}
-
-#[test]
-fn test_high_point_square() {
-    assert_eq!(SQUARE.high_point(0), Some(1));
-    assert_eq!(SQUARE.high_point(1), Some(1));
-    assert_eq!(SQUARE.high_point(2), None);
-    assert_eq!(SQUARE.high_point(3), None);
-}
 #[derive(Debug, Eq, PartialEq, Hash)]
 struct RowCol {
     r: usize,
@@ -252,7 +172,7 @@ struct RowCol {
 
 #[derive(Debug, Default)]
 struct Tower {
-    height: [usize; TOWER_WIDTH],
+    height: usize,
     occupied: HashSet<RowCol>,
 }
 
@@ -277,7 +197,7 @@ impl Tower {
     }
 
     fn high_point(&self) -> usize {
-        let fast = *self.height.iter().max().unwrap_or(&0);
+        let fast = self.height;
         let slow = self.occupied.iter().map(|rc| rc.r).max().unwrap_or(0);
         assert_eq!(fast, slow);
         fast
@@ -286,11 +206,7 @@ impl Tower {
 
 impl Tower {
     fn max_height(&self) -> usize {
-        *self.height.iter().max().unwrap_or(&0)
-    }
-
-    fn min_height(&self) -> usize {
-        *self.height.iter().min().unwrap_or(&usize::MAX)
+        self.height
     }
 
     fn collision(&self, shape: &Shape, shape_height: usize, shape_pos: usize) -> bool {
@@ -342,23 +258,6 @@ impl Tower {
         }
     }
 
-    fn update_height_for_landing(
-        &mut self,
-        shape: &Shape,
-        shape_pos: usize,
-        shape_height: usize,
-        shape_width: usize,
-    ) {
-        for shape_col in 0..shape_width {
-            match shape.high_point(shape_col) {
-                Some(highpoint) => {
-                    self.height[shape_pos + shape_col] = shape_height + highpoint;
-                }
-                None => (),
-            }
-        }
-    }
-
     fn update_occupation_for_landing(
         &mut self,
         shape: &Shape,
@@ -374,6 +273,7 @@ impl Tower {
                         r: shape_row + shape_height,
                         c: shape_col + shape_pos,
                     };
+                    self.height = max(self.height, rc.r);
                     self.occupied.insert(rc);
                 }
             }
@@ -405,7 +305,6 @@ impl Tower {
         }
         let height_after_fall = *shape_height - 1;
         if self.collision(shape, height_after_fall, *shape_pos) {
-            self.update_height_for_landing(shape, *shape_pos, *shape_height, shape_width);
             self.update_occupation_for_landing(shape, *shape_pos, *shape_height, shape_width);
             if verbosity.meets(&Verbosity::High) {
                 println!(
@@ -429,18 +328,15 @@ impl Tower {
 
 #[cfg(test)]
 fn build_tower(rcs: &[(usize, usize)]) -> Tower {
-    let mut height = [0; TOWER_WIDTH];
     let occupied: HashSet<RowCol> = rcs
         .iter()
         .copied()
-        .map(|(row, col)| {
-            if col < TOWER_WIDTH {
-                height[col] = max(height[col], row);
-            }
-            RowCol { r: row, c: col }
-        })
+        .map(|(row, col)| RowCol { r: row, c: col })
         .collect();
-    Tower { height, occupied }
+    Tower {
+        height: occupied.iter().map(|rc| rc.r).max().unwrap_or(0),
+        occupied,
+    }
 }
 
 #[test]
@@ -628,6 +524,7 @@ fn main() {
         .trim();
 
     // part 1: 3123 is too low.
+    // part 1: 3124 is too low.
     println!(
         "Day 17 part 1: {}",
         solve_part1(&Verbosity::High, input).expect("should be able to solve part 1")
