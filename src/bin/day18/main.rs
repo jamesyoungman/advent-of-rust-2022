@@ -1,20 +1,27 @@
+use core::ops::Range;
 use std::collections::BTreeSet;
 use std::collections::HashSet;
-use std::fmt::{Debug, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::str;
 
 use lib::error::Fail;
 
-#[derive(Eq, PartialEq)]
+#[derive(Eq, PartialEq, Clone, Hash)]
 struct Cube {
-    n: [u32; 3],
+    n: [i32; 3],
 }
 
-fn cube(x: u32, y: u32, z: u32) -> Cube {
+fn cube(x: i32, y: i32, z: i32) -> Cube {
     Cube { n: [x, y, z] }
 }
 
 impl Debug for Cube {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "{},{},{}", self.n[0], self.n[1], self.n[2])
+    }
+}
+
+impl Display for Cube {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(f, "{},{},{}", self.n[0], self.n[1], self.n[2])
     }
@@ -29,6 +36,20 @@ impl Cube {
             .sum::<i64>()
             == 1
     }
+
+    fn all_possible_neighbours(&self) -> Vec<Cube> {
+        let x = self.n[0];
+        let y = self.n[1];
+        let z = self.n[2];
+        vec![
+            cube(x - 1, y, z),
+            cube(x + 1, y, z),
+            cube(x, y - 1, z),
+            cube(x, y + 1, z),
+            cube(x, y, z - 1),
+            cube(x, y, z + 1),
+        ]
+    }
 }
 
 #[test]
@@ -40,9 +61,6 @@ fn test_neighbours() {
 }
 
 fn exposed_faces_on_axis(first: &Cube, second: &Cube, axis: usize) -> usize {
-    //dbg!(axis);
-    //dbg!(first);
-    //dbg!(second);
     let diffs = (
         second.n[axis] - first.n[axis],
         second.n[(axis + 1) % 3] == first.n[(axis + 1) % 3],
@@ -64,11 +82,11 @@ fn exposed_faces_on_axis(first: &Cube, second: &Cube, axis: usize) -> usize {
 
 struct Slice {
     axis: usize,
-    at: u32,
-    positions: BTreeSet<[u32; 2]>,
+    at: i32,
+    positions: BTreeSet<[i32; 2]>,
 }
 
-fn take_slice(cubes: &[Cube], axis: usize, value: u32) -> Slice {
+fn take_slice(cubes: &[Cube], axis: usize, value: i32) -> Slice {
     Slice {
         axis,
         at: value,
@@ -189,7 +207,7 @@ fn test_count_slice_exposed_faces() {
 //}
 
 fn count_exposed_faces_on_axis(cubes: &mut Vec<Cube>, axis: usize) -> usize {
-    let slice_locations: BTreeSet<u32> = cubes.iter().map(|cube| cube.n[axis]).collect();
+    let slice_locations: BTreeSet<i32> = cubes.iter().map(|cube| cube.n[axis]).collect();
     let slices: Vec<Slice> = slice_locations
         .iter()
         .map(|&pos| take_slice(cubes, axis, pos))
@@ -235,6 +253,18 @@ fn test_count_exposed_colinear_faces() {
         count_exposed_faces(&mut vec![cube(1, 1, 1), cube(3, 1, 1)]),
         12
     );
+}
+
+#[test]
+fn test_non_colinear() {
+    // These cubes are not neighbours, and there is no internal void,
+    // to the computations for both part1 and part2 should yield the
+    // same number.
+    fn test_input() -> Vec<Cube> {
+        vec![cube(3, 2, 2), cube(3, 2, 5)]
+    }
+    assert_eq!(count_exposed_faces(&mut test_input()), 12);
+    assert_eq!(externally_accessible_area(&test_input()), 12);
 }
 
 #[test]
@@ -306,7 +336,255 @@ fn solve_part1(s: &str) -> usize {
     count_exposed_faces(&mut cubes)
 }
 
+fn bounds_of_droplet_for_axis(cubes: &[Cube], axis: usize) -> Option<Range<i32>> {
+    let extract_value = |cube: &Cube| cube.n[axis];
+    let min = cubes.iter().map(extract_value).min();
+    let max = cubes.iter().map(extract_value).max();
+    match (min, max) {
+        (Some(low), Some(high)) => Some(low..(high + 1)),
+        (None, None) => None,
+        (None, Some(_)) | (Some(_), None) => unreachable!(),
+    }
+}
+
+fn bounds_of_droplet(cubes: &[Cube]) -> Option<[Range<i32>; 3]> {
+    let bounds0 = bounds_of_droplet_for_axis(cubes, 0);
+    let bounds1 = bounds_of_droplet_for_axis(cubes, 1);
+    let bounds2 = bounds_of_droplet_for_axis(cubes, 2);
+    match (bounds0, bounds1, bounds2) {
+        (Some(b0), Some(b1), Some(b2)) => Some([b0, b1, b2]),
+        (None, None, None) => None,
+        _ => unreachable!(),
+    }
+}
+
+fn retain_greatest<'a>(
+    accumulator: Option<&'a Cube>,
+    cube: &'a Cube,
+    axis: usize,
+) -> Option<&'a Cube> {
+    if let Some(greatest) = accumulator {
+        if greatest.n[axis] < cube.n[axis] {
+            Some(cube)
+        } else {
+            Some(greatest)
+        }
+    } else {
+        Some(cube)
+    }
+}
+
+fn grow_by(bounds: [Range<i32>; 3], n: i32) -> [Range<i32>; 3] {
+    [
+        (bounds[0].start - n)..(bounds[0].end + n),
+        (bounds[1].start - n)..(bounds[1].end + n),
+        (bounds[2].start - n)..(bounds[2].end + n),
+    ]
+}
+
+fn flood_fill_impl<F, V, I>(
+    todo: &mut Vec<Cube>,
+    neighbours: F,
+    mut visitor: V,
+    seen: &mut HashSet<Cube>,
+) where
+    F: Fn(&Cube) -> I,
+    V: FnMut(&Cube),
+    I: Iterator<Item = Cube>,
+{
+    println!("flood_fill_impl: {} items to work on: {todo:?}", todo.len());
+    while let Some(cube) = todo.pop() {
+        //println!("considering cube {cube}");
+        //println!("calling visitor callback for {cube}");
+        visitor(&cube);
+
+        for neighbour in neighbours(&cube) {
+            if seen.contains(&neighbour) {
+                //println!("we saw neighcour {neighbour} already");
+            } else {
+                //println!("remembering to visit neighbour {neighbour} later");
+                todo.push(neighbour);
+            }
+        }
+        seen.insert(cube);
+    }
+}
+
+fn flood_fill<F, V, I>(here: &Cube, neighbours: F, mut visitor: V, seen: &mut HashSet<Cube>)
+where
+    F: Fn(&Cube) -> I,
+    V: FnMut(&Cube),
+    I: Iterator<Item = Cube>,
+{
+    flood_fill_impl(&mut vec![here.clone()], neighbours, visitor, seen);
+}
+
+fn externally_accessible_area(cubes: &[Cube]) -> usize {
+    let droplet_bounds: [Range<i32>; 3] = match bounds_of_droplet(cubes) {
+        None => {
+            return 0;
+        }
+        Some(bounds) => bounds,
+    };
+    let bounding_box = grow_by(droplet_bounds, 1);
+    // start is a location which is not inside the droplet, but
+    // adjoins it.  Note that it must adjoin the droplet itself, not
+    // the bounding box.  We choose an outlier in the +X direction
+    let start = match cubes
+        .iter()
+        .fold(None, |acc, cube| retain_greatest(acc, cube, 0))
+    {
+        None => {
+            return 0;
+        }
+        Some(cube) => {
+            let result = Cube {
+                n: [cube.n[0] + 1, cube.n[1], cube.n[2]],
+            };
+            println!("cube {cube} is inside the droplet, so using {result} as the start point");
+            result
+        }
+    };
+    let mut visited: HashSet<Cube> = HashSet::new();
+    let inbounds = |c: &Cube| -> bool {
+        c.n.iter()
+            .enumerate()
+            .all(|(axis, pos)| bounding_box[axis].contains(pos))
+    };
+    let droplet: HashSet<Cube> = cubes.iter().cloned().collect();
+    let neighbours = |cube: &Cube| {
+        assert!(!droplet.contains(cube));
+        cube.all_possible_neighbours()
+            .into_iter()
+            .filter(|c: &Cube| inbounds(&c))
+            .filter(|c: &Cube| !droplet.contains(&c))
+    };
+    let mut area: HashSet<(Cube, char)> = HashSet::new();
+    let mut visit = |c: &Cube| {
+        //println!("visiting {c} (which is outside the droplet)");
+        assert!(!droplet.contains(c));
+        for n in c.all_possible_neighbours() {
+            if droplet.contains(&n) {
+                let arrow: Vec<char> = c.n.iter().zip(n.n.iter()).enumerate()
+                    .filter_map(|(axis, (cpos, npos))| {
+			if cpos == npos {
+			    None
+			} else {
+			    let delta = (cpos - npos).signum();
+			    let ch = match (axis, delta) {
+				(0, 1) => 'X',
+				(0, -1) => 'x',
+				(1, 1) => 'Y',
+				(1, -1) => 'y',
+				(2, 1) => 'Z',
+				(2, -1) => 'z',
+				_ => {panic!("arrow computation failed: axis={axis} delta={delta} cpos={cpos} npos={npos}");}
+			    };
+			    Some(ch)
+			}
+		    })
+                    .collect();
+                println!("the neighbour {n} of {c} is inside the droplet so contributes one face ({arrow:?}) to the area");
+                match arrow.as_slice() {
+                    [only] => {
+                        area.insert((c.clone(), *only));
+                    }
+                    [] => {
+                        panic!("cannot determine direction of face!");
+                    }
+                    _ => {
+                        panic!("ambiguous direction of face!");
+                    }
+                }
+            } else {
+                //println!("the neighbour {n} of {c} is not inside the droplet, so does not contribute to the area");
+            }
+        }
+    };
+    flood_fill(&start, neighbours, visit, &mut visited);
+    area.len()
+}
+
+#[test]
+fn test_externally_accessible_area_simple_cases() {
+    assert_eq!(externally_accessible_area(&[]), 0);
+    assert_eq!(externally_accessible_area(&[cube(1, 1, 1)]), 6);
+    assert_eq!(
+        externally_accessible_area(&[cube(1, 1, 1), cube(2, 1, 1),]),
+        10
+    );
+    assert_eq!(
+        externally_accessible_area(&[cube(1, 1, 1), cube(2, 1, 1), cube(3, 1, 1)]),
+        14
+    );
+    assert_eq!(
+        externally_accessible_area(&[cube(1, 1, 1), cube(2, 1, 1), cube(3, 1, 1)]),
+        14
+    );
+}
+
+fn make_solid_cube() -> Vec<Cube> {
+    let mut the_cube: Vec<Cube> = Vec::with_capacity(27);
+    for x in -1..=1 {
+        for y in -1..=1 {
+            for z in -1..=1 {
+                the_cube.push(cube(x, y, z));
+            }
+        }
+    }
+    the_cube
+}
+
+fn make_hollow_cube() -> Vec<Cube> {
+    let mut result = make_solid_cube();
+    result.retain(|c| c != &cube(0, 0, 0));
+    result
+}
+
+#[test]
+fn test_externally_accessible_area_hollow_cube() {
+    let hollow_cube = make_hollow_cube();
+    assert_eq!(externally_accessible_area(&hollow_cube), 6 * 9);
+
+    let mut solid_cube = make_solid_cube();
+    assert_eq!(externally_accessible_area(&solid_cube), 6 * 9); // unchanged.
+
+    // snip a corner off.
+    solid_cube.retain(|c| c != &cube(1, 1, 1));
+    assert_eq!(externally_accessible_area(&solid_cube), 6 * 9); // still unchanged.
+
+    // Slice off the far Z-axis end.
+    let mut cube = make_solid_cube();
+    cube.retain(|c| c.n[2] != 1);
+    assert_eq!(externally_accessible_area(&cube), 2 * 9 + 4 * 6);
+}
+
+fn solve_part2(s: &str) -> usize {
+    let cubes = parse_input(s).expect("input should be valid");
+    externally_accessible_area(&cubes)
+}
+
+#[test]
+fn test_externally_accessible_area_part2_example_smaller() {
+    let mut example_cubes = example();
+    example_cubes.retain(|c| c.n[0] > 2);
+    let area = externally_accessible_area(&example_cubes);
+    assert!(area % 2 == 0, "area is {area}");
+}
+
+#[test]
+fn test_externally_accessible_area_part2_example() {
+    let example_cubes = example();
+    assert_eq!(externally_accessible_area(&example_cubes), 58);
+}
+
+#[test]
+fn test_solve_part1() {
+    assert_eq!(count_exposed_faces(&mut example()), 64);
+}
+
 fn main() {
     let input = str::from_utf8(include_bytes!("input.txt")).expect("valid input");
     println!("Day 18 part 1: {}", solve_part1(input));
+    println!("Day 18 part 2: {}", solve_part2(input));
 }
