@@ -1,4 +1,6 @@
 use std::cmp::{max, min};
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::fmt::{Debug, Display, Formatter};
 use std::str;
@@ -164,7 +166,7 @@ fn test_width_square() {
     assert_eq!(SQUARE.width(), 2);
 }
 
-#[derive(Debug, Eq, PartialEq, Hash)]
+#[derive(Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
 struct RowCol {
     r: usize,
     c: usize,
@@ -173,7 +175,7 @@ struct RowCol {
 #[derive(Debug, Default)]
 struct Tower {
     height: usize,
-    occupied: HashSet<RowCol>,
+    occupied: BTreeMap<usize, u8>,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -198,9 +200,34 @@ impl Tower {
 
     fn high_point(&self) -> usize {
         let fast = self.height;
-        let slow = self.occupied.iter().map(|rc| rc.r).max().unwrap_or(0);
+        let slow = self
+            .occupied
+            .iter()
+            .rev()
+            .filter_map(|(r, cells)| if cells != 0 { Some(r) } else { None })
+            .next()
+            .unwrap_or(0);
         assert_eq!(fast, slow);
         fast
+    }
+
+    //fn rows_are_identical(&self, r1: usize, r2: usize) {
+    //	fn range_for_row(r: usize) -> Range<RowCol> {
+    //	    (Included(RowCol{r: r, c:0}), Excluded(RowCol{r: r+1, c:0}))
+    //	}
+    //	let range1 = self.occupied.range(range_for_row(r1));
+    //	let range2 = self.occupied.range(range_for_row(r2));
+    //	self.occupied.range(range1).zip(self.occupied(range2))
+    //	    .all(|(v1, v2) v1 == v2)
+    //}
+
+    fn cycle_exists_at(&self, from_row: usize, to_row: usize) -> bool {
+        assert!(from_row < to_row);
+        todo!()
+    }
+
+    fn find_cycle(&self) -> Option<(usize, usize)> {
+        todo!()
     }
 }
 
@@ -328,7 +355,7 @@ impl Tower {
 
 #[cfg(test)]
 fn build_tower(rcs: &[(usize, usize)]) -> Tower {
-    let occupied: HashSet<RowCol> = rcs
+    let occupied: BTreeSet<RowCol> = rcs
         .iter()
         .copied()
         .map(|(row, col)| RowCol { r: row, c: col })
@@ -460,7 +487,7 @@ impl Verbosity {
     }
 }
 
-fn solve_part1(verbosity: &Verbosity, directions: &str) -> Result<usize, Fail> {
+fn simulate(verbosity: &Verbosity, directions: &str, hit_limit: usize) -> Result<Tower, Fail> {
     let jets: Vec<Direction> = parse_jet_sequence(directions)?;
     let mut jet_iter = jets.iter().cycle();
     let mut shape_generator = ShapeGenerator::new();
@@ -479,11 +506,13 @@ fn solve_part1(verbosity: &Verbosity, directions: &str) -> Result<usize, Fail> {
             shape_width = newshape.width();
             shape = Some(newshape);
 
-            println!(
-                "Rock {} begins falling:\n{}",
-                hit_count + 1,
-                draw(&tower, shape, shape_height, shape_pos)
-            );
+            if verbosity.meets(&Verbosity::High) {
+                println!(
+                    "Rock {} begins falling:\n{}",
+                    hit_count + 1,
+                    draw(&tower, shape, shape_height, shape_pos)
+                );
+            }
         }
 
         let direction: &Direction = jet_iter.next().unwrap();
@@ -495,27 +524,52 @@ fn solve_part1(verbosity: &Verbosity, directions: &str) -> Result<usize, Fail> {
             &mut shape_pos,
             direction,
         ) {
-            println!(
-                "hit at height {}; updated tower height is {}",
-                shape_height,
-                tower.max_height()
-            );
+            if verbosity.meets(&Verbosity::High) {
+                println!(
+                    "hit at height {}; updated tower height is {}",
+                    shape_height,
+                    tower.max_height()
+                );
+            }
             shape = None;
             hit_count += 1;
-            println!("{hit_count} rocks have landed.");
-            if hit_count == 2022 {
-                return Ok(tower.high_point());
+            if verbosity.meets(&Verbosity::High) {
+                println!("{hit_count} rocks have landed.");
+            }
+            if hit_count == hit_limit {
+                return Ok(tower);
             }
         }
     }
 }
 
+fn solve_part1(verbosity: &Verbosity, directions: &str) -> Result<usize, Fail> {
+    let tower = simulate(verbosity, directions, 2022)?;
+    Ok(tower.high_point())
+}
+
+fn solve_part2(verbosity: &Verbosity, directions: &str) -> Result<usize, Fail> {
+    let long_enough = directions.len() * SHAPE_SEQUENCE.len();
+    println!("{long_enough} should be long enough");
+    let tower = simulate(verbosity, directions, long_enough).expect("simulation should succeed");
+    let (cycle_rocks, cycle_height) = tower.find_cycle().expect("a cycle should exist");
+    println!("part 2: cycle_rocks={cycle_rocks}, cycle_height={cycle_height}");
+    todo!()
+}
+
+#[cfg(test)]
+fn example() -> &'static str {
+    ">>><<><>><<<>><>>><<<>>><<<><<<>><>><<>>"
+}
+
 #[test]
 fn test_part1_example() {
-    assert_eq!(
-        solve_part1(&Verbosity::High, ">>><<><>><<<>><>>><<<>>><<<><<<>><>><<>>"),
-        Ok(3068)
-    );
+    assert_eq!(solve_part1(&Verbosity::None, example()), Ok(3068));
+}
+
+#[test]
+fn test_part2_example() {
+    assert_eq!(solve_part2(&Verbosity::None, example()), Ok(1514285714288));
 }
 
 fn main() {
@@ -523,8 +577,6 @@ fn main() {
         .expect("valid input")
         .trim();
 
-    // part 1: 3123 is too low.
-    // part 1: 3124 is too low.
     println!(
         "Day 17 part 1: {}",
         solve_part1(&Verbosity::High, input).expect("should be able to solve part 1")
