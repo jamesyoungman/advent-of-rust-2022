@@ -372,7 +372,7 @@ mod part2 {
         }
     }
 
-    fn flood_fill<F, V, I>(here: &Cube, neighbours: F, mut visitor: V, seen: &mut HashSet<Cube>)
+    fn flood_fill<F, V, I>(here: &Cube, neighbours: F, visitor: V, seen: &mut HashSet<Cube>)
     where
         F: Fn(&Cube) -> I,
         V: FnMut(&Cube),
@@ -422,7 +422,7 @@ mod part2 {
                 .filter(|c: &Cube| !droplet.contains(c))
         };
         let mut area: HashSet<(Cube, char)> = HashSet::new();
-        let mut visit = |c: &Cube| {
+        let visit = |c: &Cube| {
             //println!("visiting {c} (which is outside the droplet)");
             assert!(!droplet.contains(c));
             for n in c.all_possible_neighbours() {
