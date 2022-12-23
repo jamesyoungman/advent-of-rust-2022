@@ -20,6 +20,18 @@ impl CompassDirection {
     }
 }
 
+impl Display for CompassDirection {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        use CompassDirection::*;
+        f.write_str(match self {
+            North => "S",
+            South => "N",
+            East => "W",
+            West => "E",
+        })
+    }
+}
+
 impl From<CompassDirection> for char {
     fn from(d: CompassDirection) -> char {
         use CompassDirection::*;
