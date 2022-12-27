@@ -1,7 +1,12 @@
-use std::{cmp::max, collections::HashMap, iter::once, str};
+use std::{
+    cmp::max,
+    collections::{HashMap, VecDeque},
+    iter::once,
+    str,
+};
 
 use lib::error::Fail;
-use lib::grid::{CompassDirection, Position};
+use lib::grid::{CompassDirection, Position, ALL_MOVE_OPTIONS};
 use CompassDirection::*;
 
 #[derive(Debug)]
@@ -101,38 +106,43 @@ impl Weather {
 fn test_blizzard_positions() {
     use CompassDirection::*;
     let weather = Weather {
-	blizzard_initial_positions: [
-	    (Position{x: 1, y: 1}, East),
-	    (Position{x: 3, y: 1}, West)
-	].into_iter().collect()
+        blizzard_initial_positions: [
+            (Position { x: 1, y: 1 }, East),
+            (Position { x: 3, y: 1 }, West),
+        ]
+        .into_iter()
+        .collect(),
     };
     let pos0 = weather.blizzard_positions(1, 5, 0);
     dbg!(&pos0);
     // #####
     // #>.<#
     // #####
-    assert_eq!(pos0.get(&Position{x: 1,y: 1}), Some(&vec![East]));
-    assert_eq!(pos0.get(&Position{x: 3,y: 1}), Some(&vec![West]));
+    assert_eq!(pos0.get(&Position { x: 1, y: 1 }), Some(&vec![East]));
+    assert_eq!(pos0.get(&Position { x: 3, y: 1 }), Some(&vec![West]));
     let pos1 = weather.blizzard_positions(1, 5, 1);
     dbg!(&pos1);
     // #####
     // #.2.#
     // #####
-    assert_eq!(pos1.get(&Position{x: 2,y: 1}).unwrap_or(&vec![]).len(), 2);
+    assert_eq!(
+        pos1.get(&Position { x: 2, y: 1 }).unwrap_or(&vec![]).len(),
+        2
+    );
     let pos2 = weather.blizzard_positions(1, 5, 2);
     dbg!(&pos2);
     // #####
     // #<.>#
     // #####
-    assert_eq!(pos2.get(&Position{x: 1,y: 1}), Some(&vec![West]));
-    assert_eq!(pos2.get(&Position{x: 3,y: 1}), Some(&vec![East]));
+    assert_eq!(pos2.get(&Position { x: 1, y: 1 }), Some(&vec![West]));
+    assert_eq!(pos2.get(&Position { x: 3, y: 1 }), Some(&vec![East]));
     let pos3 = weather.blizzard_positions(1, 5, 3);
     dbg!(&pos3);
     // #####
     // #>.<#
     // #####
-    assert_eq!(pos3.get(&Position{x: 1,y: 1}), Some(&vec![East]));
-    assert_eq!(pos3.get(&Position{x: 3,y: 1}), Some(&vec![West]));
+    assert_eq!(pos3.get(&Position { x: 1, y: 1 }), Some(&vec![East]));
+    assert_eq!(pos3.get(&Position { x: 3, y: 1 }), Some(&vec![West]));
 }
 
 #[test]
@@ -149,7 +159,8 @@ fn test_example_blizzards_1() {
     );
     assert_eq!(
         positions.get(&Position { x: 3, y: 1 }).map(|v| v.len()),
-        Some(3));
+        Some(3)
+    );
 }
 
 #[derive(Debug)]
@@ -161,6 +172,29 @@ struct Valley {
 }
 
 impl Valley {
+    fn is_valid_position(&self, pos: &Position) -> bool {
+	if pos.x <= 0 {
+	    false
+	} else if pos.y < 0 {
+	    false
+	} else if pos.y == 0 {
+	    pos.x == self.entrance
+	} else if pos.y == self.length {
+	    pos.x == self.exit
+	} else {
+	    pos.x < self.width && pos.y < self.length
+	}
+    }
+    
+    fn neighbours(&self, pos: &Position) -> Vec<Position> {
+        ALL_MOVE_OPTIONS
+            .iter()
+            .map(|dir| pos.move_direction(dir))
+	    .chain(once(*pos))	// can also stay still.
+            .filter(|pos| self.is_valid_position(&pos))
+            .collect()
+    }
+
     fn to_string(&self, expedition: &Position, weather: &Weather, minute: i64) -> String {
         let mut result: String =
             String::with_capacity((self.width as usize + 3) * (self.length as usize + 1));
@@ -282,7 +316,7 @@ fn parse_input(s: &str) -> Result<(Valley, Weather), Fail> {
         }
         for (col, ch) in line.chars().enumerate() {
             maxcol = max(maxcol, col);
-	    if let Some(dir) = char_to_direction(ch) {
+            if let Some(dir) = char_to_direction(ch) {
                 blizzard_initial_positions.insert(
                     Position {
                         x: col as i64,
@@ -412,12 +446,12 @@ fn test_display_2() {
     assert_eq!(
         output,
         concat!(
-	    "#.######\n",
-	    "#.2>2..#\n",
-	    "#E^22^<#\n",
-	    "#.>2.^>#\n",
-	    "#.>..<.#\n",
-	    "######.#\n",
+            "#.######\n",
+            "#.2>2..#\n",
+            "#E^22^<#\n",
+            "#.>2.^>#\n",
+            "#.>..<.#\n",
+            "######.#\n",
         )
     );
 }
@@ -430,22 +464,80 @@ fn test_display_9() {
     assert_eq!(
         output,
         concat!(
-	    "#.######\n",
-	    "#<E2>>.#\n",
-	    "#.<<.<.#\n",
-	    "#>2>2^.#\n",
-	    "#.v><^.#\n",
-	    "######.#\n",
+            "#.######\n",
+            "#<E2>>.#\n",
+            "#.<<.<.#\n",
+            "#>2>2^.#\n",
+            "#.v><^.#\n",
+            "######.#\n",
         )
     );
 }
 
-fn main() {
-    //    let input = str::from_utf8(include_bytes!("input.txt")).expect("valid input");
+fn bfs<NF>(start: Position, goal: Position, neighbours: NF) -> Option<(i64, Vec<Position>)>
+where
+    NF: Fn(Position, i64) -> Vec<Position>,
+{
+    let mut frontier: VecDeque<Position> = VecDeque::new();
+    let mut minute: i64 = 0;
+
+    frontier.push_front(start);
+
+    while !frontier.is_empty() {
+	println!("minute {minute}: {} positions on the frontier", frontier.len());
+
+	let mut next_frontier: VecDeque<Position> = VecDeque::new();
+        while let Some(p) = frontier.pop_front() {
+            if p == goal {
+                return Some((minute, vec![]));
+            }
+            let nv = neighbours(p, minute+1);
+	    //println!("Position {p} has {} valid neighbours at time {}: {nv:?}",
+	    //	     nv.len(), minute+1);
+	    next_frontier.extend(nv.iter());
+        }
+        minute += 1;
+	println!("copying {} entries from next_frontier to frontier",
+		 next_frontier.len());
+        assert!(frontier.is_empty());
+        frontier.extend(next_frontier.drain(0..));
+    }
+    None
+}
+
+fn solve_part1(valley: &Valley, weather: &Weather) -> Option<i64> {
+    let neighbours = |pos: Position, t: i64| -> Vec<Position> {
+        let blizzards = weather.blizzard_positions(valley.length, valley.width, t);
+        let mut neighbours = valley.neighbours(&pos);
+	neighbours.retain(|pos| !blizzards.contains_key(pos));
+	neighbours
+    };
+    let start = Position {
+	x: valley.entrance,
+	y: 0,
+    };
+    let goal = Position{
+	x: valley.exit,
+	y: valley.length - 1,
+    };
+    match bfs(start, goal, neighbours) {
+	Some((minutes, path)) => {
+	    dbg!(&path);
+	    Some(minutes)
+	}
+	None => None,
+    }
+}
+
+#[test]
+fn test_solve_part1() {
     let (valley, weather) = parse_input(example()).expect("example should be valid");
-    //dbg!(&weather);
-    dbg!(&valley);
-    let e = Position { x: 1, y: 0 };
-    let output = valley.to_string(&e, &weather, 0);
-    print!("{}", output);
+    assert_eq!(solve_part1(&valley,&weather), Some(18));
+}
+
+
+fn main() {
+    let input = str::from_utf8(include_bytes!("input.txt")).expect("valid input");
+    let (valley, weather) = parse_input(input).expect("input should be valid");
+    print!("{}", solve_part1(&valley, &weather).expect("should find solution"));
 }
