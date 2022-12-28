@@ -517,27 +517,28 @@ fn test_display_9() {
     );
 }
 
-fn bfs<NF>(start: Position, goal: Position, neighbours: NF) -> Option<i64>
+fn bfs<N, NF>(start: N, goal: N, neighbours: NF) -> Option<i64>
 where
-    NF: Fn(Position, i64) -> Vec<Position>,
+    N: Eq + Ord + Copy,
+    NF: Fn(N, i64) -> Vec<N>,
 {
-    let mut frontier: BTreeSet<Position> = BTreeSet::new();
+    let mut frontier: BTreeSet<N> = BTreeSet::new();
     let mut minute: i64 = 0;
 
     frontier.insert(start);
 
     while !frontier.is_empty() {
-        println!(
-            "minute {minute}: {} positions on the frontier",
-            frontier.len()
-        );
+        //println!(
+        //    "minute {minute}: {} positions on the frontier",
+        //    frontier.len()
+        //);
 
         if frontier.contains(&goal) {
             return Some(minute);
         }
 
         minute += 1;
-        let next_frontier: BTreeSet<Position> = frontier
+        let next_frontier: BTreeSet<N> = frontier
             .iter()
             .flat_map(|p| neighbours(*p, minute))
             .collect();
@@ -570,11 +571,84 @@ fn test_solve_part1() {
     assert_eq!(solve_part1(&valley, &weather), Some(18));
 }
 
+fn solve_part2(valley: &Valley, weather: &Weather) -> Option<i64> {
+    #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
+    enum Phase {
+        Outward,      // moving entrance->exit
+        Return,       // returning for the snack
+        OutwardAgain, // moving entrance->exit again
+    }
+    #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
+    struct State {
+        phase: Phase,
+        pos: Position,
+    }
+    let start = State {
+        phase: Phase::Outward,
+        pos: Position {
+            x: valley.entrance,
+            y: 0,
+        },
+    };
+    let goal = State {
+        phase: Phase::OutwardAgain,
+        pos: Position {
+            x: valley.exit,
+            y: valley.length - 1,
+        },
+    };
+    let neighbours = |state: State, t: i64| -> Vec<State> {
+        let blizzards = weather.blizzard_positions(valley.length, valley.width, t);
+        valley
+            .neighbours(&state.pos)
+            .iter()
+            .filter(|pos| !blizzards.contains_key(pos))
+            .map(|pos| {
+                if pos == &start.pos {
+                    State {
+                        phase: if state.phase == Phase::Return {
+                            Phase::OutwardAgain
+                        } else {
+                            state.phase
+                        },
+                        pos: *pos,
+                    }
+                } else if pos == &goal.pos {
+                    State {
+                        phase: if state.phase == Phase::Outward {
+                            Phase::Return
+                        } else {
+                            state.phase
+                        },
+                        pos: *pos,
+                    }
+                } else {
+                    State {
+                        phase: state.phase,
+                        pos: *pos,
+                    }
+                }
+            })
+            .collect::<Vec<State>>()
+    };
+    bfs(start, goal, neighbours)
+}
+
+#[test]
+fn test_solve_part2() {
+    let (valley, weather) = parse_input(example()).expect("example should be valid");
+    assert_eq!(solve_part2(&valley, &weather), Some(54));
+}
+
 fn main() {
     let input = str::from_utf8(include_bytes!("input.txt")).expect("valid input");
     let (valley, weather) = parse_input(input).expect("input should be valid");
     println!(
         "Day 24 part 1: {}",
-        solve_part1(&valley, &weather).expect("should find solution")
+        solve_part1(&valley, &weather).expect("should find solution to part 1")
+    );
+    println!(
+        "Day 24 part 2: {}",
+        solve_part2(&valley, &weather).expect("should find solution to part 2")
     );
 }
