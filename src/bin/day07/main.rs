@@ -139,8 +139,7 @@ fn parse_commands(s: &str) -> Result<FileSystem, Fail> {
                                     None => {
                                         if dirname != "/" {
                                             eprintln!(
-						"the user did cd {} (with cwd {:?}) without having seen {} in ls output!",
-						dirname, cwd, dirname
+						"the user did cd {dirname} (with cwd {cwd:?}) without having seen {dirname} in ls output!"
 					    );
                                         }
                                         cwd = Some(fs.add_dir(cwd, dirname));

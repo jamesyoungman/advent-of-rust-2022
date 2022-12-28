@@ -35,7 +35,7 @@ impl TryFrom<&str> for Item {
     fn try_from(s: &str) -> Result<Self, <Self as TryFrom<&str>>::Error> {
         let worry_level = s
             .parse()
-            .map_err(|e| Fail(format!("{} is not an item id: {}", s, e)))?;
+            .map_err(|e| Fail(format!("{s} is not an item id: {e}")))?;
         Ok(Item { worry_level })
     }
 }
@@ -96,7 +96,7 @@ impl TryFrom<&str> for Operation {
         match scanf!(s, "new = old {char} {str}") {
             Ok(('*', rhs)) => Ok(Operation::Multiply(Operand::try_from(rhs)?)),
             Ok(('+', rhs)) => Ok(Operation::Add(Operand::try_from(rhs)?)),
-            Ok((op, _)) => Err(Fail(format!("unknown operation {}", op))),
+            Ok((op, _)) => Err(Fail(format!("unknown operation {op}"))),
             Err(_) => Err(Fail(format!("incorect operation format [{s}]"))),
         }
     }
@@ -241,7 +241,7 @@ fn show_round_result(round_number: usize, monkeys: &mut BTreeMap<u32, Monkey>) {
             if i > 0 {
                 print!(", ");
             }
-            print!("{}", item);
+            print!("{item}");
         }
         println!();
     }
@@ -296,7 +296,7 @@ where
         } else {
             first = false;
         }
-        write!(f, "{}", item)?;
+        write!(f, "{item}")?;
     }
     Ok(())
 }
@@ -439,7 +439,7 @@ fn solve(part: &Part, verbose: bool, monkeys: &mut BTreeMap<u32, Monkey>) -> usi
         .rev()
         .take(2)
         .inspect(|c| {
-            println!("top-two monkey: count is {}", c);
+            println!("top-two monkey: count is {c}");
         })
         .product()
 }

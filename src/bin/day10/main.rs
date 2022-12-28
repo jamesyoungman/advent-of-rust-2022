@@ -69,7 +69,7 @@ impl fmt::Display for Instruction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Instruction::Noop => f.write_str("noop"),
-            Instruction::Addx(n) => write!(f, "addx {}", n),
+            Instruction::Addx(n) => write!(f, "addx {n}"),
         }
     }
 }

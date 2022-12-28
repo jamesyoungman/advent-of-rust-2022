@@ -146,7 +146,7 @@ impl Symtab {
     fn eval(&self, expr: &Expression) -> Result<Number, Fail> {
         match expr {
             Expression::Binary(left, op, right) => {
-                op.eval(self.lookup(left)?, self.lookup(right)?, &self)
+                op.eval(self.lookup(left)?, self.lookup(right)?, self)
             }
             Expression::Value(x) => Ok(*x),
         }

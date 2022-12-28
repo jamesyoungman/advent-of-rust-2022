@@ -80,7 +80,7 @@ impl fmt::Display for State {
         for (ix, stack) in self.stacks.iter().enumerate() {
             write!(f, "{} ", ix + 1)?;
             for ch in stack.iter() {
-                write!(f, "{}", ch)?;
+                write!(f, "{ch}")?;
             }
             f.write_str("\n")?;
         }

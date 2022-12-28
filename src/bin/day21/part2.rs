@@ -175,11 +175,6 @@ fn example() -> &'static str {
     )
 }
 
-#[cfg(test)]
-fn example_symtab() -> Result<Symtab, Fail> {
-    Symtab::try_from(example())
-}
-
 impl Op {
     fn eval(&self, left: &Number, right: &Number) -> Result<Number, Fail> {
         use Op::*;
@@ -240,8 +235,8 @@ impl TryFrom<&str> for Equation {
                 return Err(Fail("no root expression".to_string()));
             }
         };
-        let left_expr = Expression::from_symbol(&left_sym, &symbols, 0)?;
-        let right_expr = Expression::from_symbol(&right_sym, &symbols, 0)?;
+        let left_expr = Expression::from_symbol(&left_sym, &symbols)?;
+        let right_expr = Expression::from_symbol(&right_sym, &symbols)?;
         Ok(Equation {
             left: left_expr,
             right: right_expr,
@@ -301,9 +296,9 @@ impl Simplified {
     }
 }
 
-impl Into<Expression> for Simplified {
-    fn into(self) -> Expression {
-        match self {
+impl From<Simplified> for Expression {
+    fn from(simplified: Simplified) -> Expression {
+        match simplified {
             Simplified::Yes(expr) => expr,
             Simplified::No(expr) => expr,
         }
@@ -315,7 +310,7 @@ fn simplify(mut expression: Expression, mut depth: usize) -> Simplified {
     loop {
         depth += 1;
         if depth > 1000 {
-            panic!("simplification depth limit exceeded on {}", expression,);
+            panic!("simplification depth limit exceeded on {expression}",);
         }
         let simplified = expression.simplify_step(depth);
         expression = match simplified {
@@ -434,25 +429,18 @@ impl Expression {
         right: Box<Expression>,
         depth: usize,
     ) -> Simplified {
-        match (left.as_ref(), right.as_ref()) {
-            // Some computations we can perform directly
-            (Expression::Value(x), Expression::Value(y)) => {
-                let value: i64 = op
-                    .eval(&x, &y)
-                    .expect("expression evaluation should succeed");
-                return Simplified::Yes(Expression::Value(value));
-            }
-            _ => (),
+        if let (Expression::Value(x), Expression::Value(y)) = (left.as_ref(), right.as_ref()) {
+            let value: i64 = op.eval(x, y).expect("expression evaluation should succeed");
+            return Simplified::Yes(Expression::Value(value));
         }
         let left: Box<Expression> = Box::new(simplify(*left, depth + 1).into());
         let right: Box<Expression> = Box::new(simplify(*right, depth + 1).into());
-        let output = match op {
+        match op {
             Op::Add => Self::simplify_step_add(left, right, depth),
             Op::Subtract => Self::simplify_step_subtract(left, right, depth),
             Op::Multiply => Self::simplify_step_multiply(left, right, depth),
             Op::Divide => Self::simplify_step_divide(left, right, depth),
-        };
-        output
+        }
     }
 
     fn simplify_step(self, depth: usize) -> Simplified {
@@ -464,34 +452,28 @@ impl Expression {
         }
     }
 
-    fn from_symbol(name: &str, symbols: &Symtab, depth: usize) -> Result<Expression, Fail> {
+    fn from_symbol(name: &str, symbols: &Symtab) -> Result<Expression, Fail> {
         match symbols.lookup(name) {
             Ok(def) => {
-                let expr = Expression::from_definition(&def, symbols, depth)?;
+                let expr = Expression::from_definition(&def, symbols)?;
                 Ok(expr)
             }
             Err(e) => Err(e),
         }
     }
 
-    fn from_definition(
-        def: &Definition,
-        symbols: &Symtab,
-        depth: usize,
-    ) -> Result<Expression, Fail> {
+    fn from_definition(def: &Definition, symbols: &Symtab) -> Result<Expression, Fail> {
         let result = match def {
             Definition::Value(n) => Expression::Value(*n),
             Definition::UnknownValue => Expression::UnknownValue,
             Definition::Binary(left_name, op, right_name) => {
                 let left = symbols.lookup(left_name)?;
                 let right = symbols.lookup(right_name)?;
-                let left_expr: Expression = Expression::from_definition(&left, symbols, depth + 1)?;
-                let right_expr: Expression =
-                    Expression::from_definition(&right, symbols, depth + 1)?;
+                let left_expr: Expression = Expression::from_definition(&left, symbols)?;
+                let right_expr: Expression = Expression::from_definition(&right, symbols)?;
                 let left_expr = simplify_if_possible(left_expr, 0);
                 let right_expr = simplify_if_possible(right_expr, 0);
-                let expr = Expression::Binary(Box::new(left_expr), *op, Box::new(right_expr));
-                expr
+                Expression::Binary(Box::new(left_expr), *op, Box::new(right_expr))
             }
         };
         Ok(result)
@@ -575,9 +557,9 @@ impl Equation {
             }
             (Binary(ll, lop, lr), Expression::Binary(rl, rop, rr)) => {
                 if lop == rop {
-                    if &lr == &rr {
+                    if lr == rr {
                         Equation::solve(*ll, *rl, depth)
-                    } else if &ll == &rl {
+                    } else if ll == rl {
                         Equation::solve(*lr, *rr, depth)
                     } else {
                         Err(Fail(format!(
@@ -599,7 +581,7 @@ fn test_ptdq() {
     let symtab = Symtab::try_from(example()).expect("symbol table should be valid");
     match symtab.lookup("ptdq") {
         Ok(def) => {
-            let expr = Expression::from_definition(&def, &symtab, 0)
+            let expr = Expression::from_definition(&def, &symtab)
                 .expect("should be able to expand definition as an expression");
             let repr = format!("{expr}");
             assert!(

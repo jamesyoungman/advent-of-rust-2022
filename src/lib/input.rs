@@ -28,7 +28,7 @@ impl Display for InputError {
             InputError::IoError {
                 filename: None,
                 err,
-            } => write!(f, "read error on input: {}", err),
+            } => write!(f, "read error on input: {err}"),
         }
     }
 }
@@ -94,8 +94,8 @@ where
     ErrorType: From<InputError> + From<InputErrorType> + Error,
     F: Fn(InputType) -> Result<T, ErrorType>,
 {
-    let program_name: String = format!("Advent of code 2019 day {}", day);
-    let about = format!("Solves Advent of Code 2019 puzzle for day {}", day);
+    let program_name: String = format!("Advent of code 2022 day {day}");
+    let about = format!("Solves Advent of Code 2022 puzzle for day {day}");
     let cmd = Command::new(program_name.as_str())
         .author("James Youngman, james@youngman.org")
         .about(about.as_str())

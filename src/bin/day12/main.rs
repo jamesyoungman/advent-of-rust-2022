@@ -146,7 +146,7 @@ where
                         q = *predecessor;
                     }
                     None => {
-                        panic!("what was before {:?}?", q);
+                        panic!("what was before {q:?}?");
                     }
                 }
             }
@@ -177,7 +177,7 @@ fn solve_part1(s: &str) -> usize {
             panic!("there is no path from S to E");
         }
         Err(e) => {
-            panic!("failed: {}", e);
+            panic!("failed: {e}");
         }
     }
 }

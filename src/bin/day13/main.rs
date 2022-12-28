@@ -380,7 +380,7 @@ fn test_parse_input_for_part2() {
 }
 
 fn solve_part2(s: &str) -> Result<usize, Fail> {
-    let input_with_dividers = format!("{}\n[[2]]\n[[6]]\n", s);
+    let input_with_dividers = format!("{s}\n[[2]]\n[[6]]\n");
     let mut items = parse_input_for_part2(&input_with_dividers).expect("example should be valid");
     items.sort();
     let start = Value::try_from("[[2]]")?;

@@ -84,7 +84,7 @@ fn common_item(sacks: &[&str]) -> Result<char, Fail> {
         let mut it = common.iter();
         if let Some(first) = it.next() {
             if let Some(second) = it.next() {
-                Err(Fail(format!("too many common items: {},{}", first, second)))
+                Err(Fail(format!("too many common items: {first},{second}")))
             } else {
                 Ok(*first)
             }

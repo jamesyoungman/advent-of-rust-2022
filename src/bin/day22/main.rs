@@ -43,7 +43,7 @@ impl Grid {
     fn start_position(&self) -> Position {
         ((self.top_left.x)..=(self.bottom_right.x))
             .map(|x| Position {
-                x: x,
+                x,
                 y: self.top_left.y,
             })
             .find(|pos: &Position| self.cells.contains_key(pos))
@@ -180,7 +180,7 @@ fn parse_directions(s: &str) -> Vec<Instruction> {
                     result.push(Instruction::Proceed(n));
                 }
                 None => {
-                    panic!("unexpected capture: {:?}", cap);
+                    panic!("unexpected capture: {cap:?}");
                 }
             },
         }
@@ -275,7 +275,7 @@ impl State {
 
 #[test]
 fn test_example() {
-    let (grid, instructions) = parse_input(example());
+    let (grid, _) = parse_input(example());
     let mut state = State::new(&grid);
     // Move in 1-step increments along the top row,
     // verify that we stop when blocked by the wall.
@@ -304,7 +304,7 @@ fn test_example() {
 fn make_journey(grid: &Grid, instructions: &[Instruction]) -> State {
     instructions
         .iter()
-        .fold(State::new(&grid), |mut state, instruction| {
+        .fold(State::new(grid), |mut state, instruction| {
             state.obey(instruction, grid);
             state
         })
