@@ -96,6 +96,7 @@ enum BlizzardsAtPos {
 }
 
 impl BlizzardsAtPos {
+    #[cfg(test)]
     fn len(&self) -> usize {
         match self {
             BlizzardsAtPos::One(_) => 1,
@@ -231,15 +232,8 @@ struct Valley {
 
 impl Valley {
     fn is_valid_position(&self, pos: &Position) -> bool {
-        if self.is_exit(pos) || self.is_entrance(pos) {
-            true
-        } else if pos.y < 1 || pos.x < 1 {
-            false
-        } else if pos.y >= self.length - 1 || pos.x >= self.width - 1 {
-            false
-        } else {
-            true
-        }
+        (self.is_exit(pos) || self.is_entrance(pos))
+            || !(pos.y < 1 || pos.x < 1 || pos.y >= self.length - 1 || pos.x >= self.width - 1)
     }
 
     fn is_entrance(&self, pos: &Position) -> bool {
@@ -255,7 +249,7 @@ impl Valley {
             .iter()
             .map(|dir| pos.move_direction(dir))
             .chain(once(*pos)) // can also stay still.
-            .filter(|pos| self.is_valid_position(&pos))
+            .filter(|pos| self.is_valid_position(pos))
             .collect()
     }
 
