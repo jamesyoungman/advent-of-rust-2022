@@ -1,6 +1,6 @@
 use std::{
     cmp::max,
-    collections::{HashMap, VecDeque},
+    collections::{BTreeSet, HashMap},
     iter::once,
     str,
 };
@@ -173,24 +173,24 @@ struct Valley {
 
 impl Valley {
     fn is_valid_position(&self, pos: &Position) -> bool {
-	if pos.x <= 0 {
-	    false
-	} else if pos.y < 0 {
-	    false
-	} else if pos.y == 0 {
-	    pos.x == self.entrance
-	} else if pos.y == self.length {
-	    pos.x == self.exit
-	} else {
-	    pos.x < self.width && pos.y < self.length
-	}
+        if pos.x <= 0 {
+            false
+        } else if pos.y < 0 {
+            false
+        } else if pos.y == 0 {
+            pos.x == self.entrance
+        } else if pos.y == self.length {
+            pos.x == self.exit
+        } else {
+            pos.x < self.width && pos.y < self.length
+        }
     }
-    
+
     fn neighbours(&self, pos: &Position) -> Vec<Position> {
         ALL_MOVE_OPTIONS
             .iter()
             .map(|dir| pos.move_direction(dir))
-	    .chain(once(*pos))	// can also stay still.
+            .chain(once(*pos)) // can also stay still.
             .filter(|pos| self.is_valid_position(&pos))
             .collect()
     }
@@ -478,29 +478,32 @@ fn bfs<NF>(start: Position, goal: Position, neighbours: NF) -> Option<(i64, Vec<
 where
     NF: Fn(Position, i64) -> Vec<Position>,
 {
-    let mut frontier: VecDeque<Position> = VecDeque::new();
+    let mut frontier: BTreeSet<Position> = BTreeSet::new();
     let mut minute: i64 = 0;
 
-    frontier.push_front(start);
+    frontier.insert(start);
 
     while !frontier.is_empty() {
-	println!("minute {minute}: {} positions on the frontier", frontier.len());
+        println!(
+            "minute {minute}: {} positions on the frontier",
+            frontier.len()
+        );
 
-	let mut next_frontier: VecDeque<Position> = VecDeque::new();
-        while let Some(p) = frontier.pop_front() {
+        let mut next_frontier: BTreeSet<Position> = BTreeSet::new();
+        while let Some(p) = frontier.pop_first() {
             if p == goal {
                 return Some((minute, vec![]));
             }
-            let nv = neighbours(p, minute+1);
-	    //println!("Position {p} has {} valid neighbours at time {}: {nv:?}",
-	    //	     nv.len(), minute+1);
-	    next_frontier.extend(nv.iter());
+            let nv = neighbours(p, minute + 1);
+            next_frontier.extend(nv.iter());
         }
         minute += 1;
-	println!("copying {} entries from next_frontier to frontier",
-		 next_frontier.len());
+        println!(
+            "copying {} entries from next_frontier to frontier",
+            next_frontier.len()
+        );
         assert!(frontier.is_empty());
-        frontier.extend(next_frontier.drain(0..));
+        frontier = next_frontier;
     }
     None
 }
@@ -509,35 +512,37 @@ fn solve_part1(valley: &Valley, weather: &Weather) -> Option<i64> {
     let neighbours = |pos: Position, t: i64| -> Vec<Position> {
         let blizzards = weather.blizzard_positions(valley.length, valley.width, t);
         let mut neighbours = valley.neighbours(&pos);
-	neighbours.retain(|pos| !blizzards.contains_key(pos));
-	neighbours
+        neighbours.retain(|pos| !blizzards.contains_key(pos));
+        neighbours
     };
     let start = Position {
-	x: valley.entrance,
-	y: 0,
+        x: valley.entrance,
+        y: 0,
     };
-    let goal = Position{
-	x: valley.exit,
-	y: valley.length - 1,
+    let goal = Position {
+        x: valley.exit,
+        y: valley.length - 1,
     };
     match bfs(start, goal, neighbours) {
-	Some((minutes, path)) => {
-	    dbg!(&path);
-	    Some(minutes)
-	}
-	None => None,
+        Some((minutes, path)) => {
+            dbg!(&path);
+            Some(minutes)
+        }
+        None => None,
     }
 }
 
 #[test]
 fn test_solve_part1() {
     let (valley, weather) = parse_input(example()).expect("example should be valid");
-    assert_eq!(solve_part1(&valley,&weather), Some(18));
+    assert_eq!(solve_part1(&valley, &weather), Some(18));
 }
-
 
 fn main() {
     let input = str::from_utf8(include_bytes!("input.txt")).expect("valid input");
     let (valley, weather) = parse_input(input).expect("input should be valid");
-    print!("{}", solve_part1(&valley, &weather).expect("should find solution"));
+    println!(
+        "Day 24 part 1: {}",
+        solve_part1(&valley, &weather).expect("should find solution")
+    );
 }
