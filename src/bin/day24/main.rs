@@ -7,7 +7,6 @@ use std::{
 
 use lib::error::Fail;
 use lib::grid::{CompassDirection, Position, ALL_MOVE_OPTIONS};
-use CompassDirection::*;
 
 #[derive(Debug)]
 struct Weather {
@@ -24,17 +23,25 @@ fn blizzard_position(
     fn pos_at_time(initial: i64, velocity: i64, t: i64, modulus: i64) -> i64 {
         (velocity * t + initial) % modulus
     }
-    let (xv, yv) = match direction {
-        CompassDirection::North => (0, -1),
-        CompassDirection::East => (1, 0),
-        CompassDirection::South => (0, 1),
-        CompassDirection::West => (-1, 0),
-    };
     let w = width - 2;
     let h = height - 2;
-    Position {
-        x: 1 + (w + pos_at_time(initial.x - 1, xv, minute, w)) % w,
-        y: 1 + (h + pos_at_time(initial.y - 1, yv, minute, h)) % h,
+    match direction {
+        CompassDirection::North => Position {
+            x: initial.x,
+            y: 1 + (h + pos_at_time(initial.y - 1, -1, minute, h)) % h,
+        },
+        CompassDirection::South => Position {
+            x: initial.x,
+            y: 1 + pos_at_time(initial.y - 1, 1, minute, h) % h,
+        },
+        CompassDirection::East => Position {
+            x: 1 + pos_at_time(initial.x - 1, 1, minute, w) % w,
+            y: initial.y,
+        },
+        CompassDirection::West => Position {
+            x: 1 + (w + pos_at_time(initial.x - 1, -1, minute, w)) % w,
+            y: initial.y,
+        },
     }
 }
 
@@ -82,21 +89,57 @@ fn test_blizzard_position() {
     );
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum BlizzardsAtPos {
+    One(CompassDirection),
+    Several(u8),
+}
+
+impl BlizzardsAtPos {
+    fn len(&self) -> usize {
+        match self {
+            BlizzardsAtPos::One(_) => 1,
+            BlizzardsAtPos::Several(n) => (*n).into(),
+        }
+    }
+
+    #[cfg(test)]
+    fn as_char(&self) -> char {
+        match self {
+            BlizzardsAtPos::One(CompassDirection::North) => '^',
+            BlizzardsAtPos::One(CompassDirection::East) => '>',
+            BlizzardsAtPos::One(CompassDirection::South) => 'v',
+            BlizzardsAtPos::One(CompassDirection::West) => '<',
+            BlizzardsAtPos::Several(n) => match char::from_digit(u32::from(*n), 10) {
+                Some(ch) => ch,
+                None => unreachable!(),
+            },
+        }
+    }
+}
+
 impl Weather {
     fn blizzard_positions(
         &self,
         valley_length: i64,
         valley_width: i64,
         minute: i64,
-    ) -> HashMap<Position, Vec<CompassDirection>> {
-        let mut result: HashMap<Position, Vec<CompassDirection>> = HashMap::new();
+    ) -> HashMap<Position, BlizzardsAtPos> {
+        let mut result: HashMap<Position, BlizzardsAtPos> = HashMap::new();
         for (initial_pos, &direction) in self.blizzard_initial_positions.iter() {
             let pos =
                 blizzard_position(initial_pos, direction, valley_width, valley_length, minute);
             result
                 .entry(pos)
-                .and_modify(|v| v.push(direction))
-                .or_insert_with(|| vec![direction]);
+                .and_modify(|what| match what {
+                    BlizzardsAtPos::One(_) => {
+                        *what = BlizzardsAtPos::Several(2);
+                    }
+                    BlizzardsAtPos::Several(n) => {
+                        *what = BlizzardsAtPos::Several(*n + 1);
+                    }
+                })
+                .or_insert(BlizzardsAtPos::One(direction));
         }
         result
     }
@@ -118,31 +161,46 @@ fn test_blizzard_positions() {
     // #####
     // #>.<#
     // #####
-    assert_eq!(pos0.get(&Position { x: 1, y: 1 }), Some(&vec![East]));
-    assert_eq!(pos0.get(&Position { x: 3, y: 1 }), Some(&vec![West]));
+    assert_eq!(
+        pos0.get(&Position { x: 1, y: 1 }),
+        Some(&BlizzardsAtPos::One(East))
+    );
+    assert_eq!(
+        pos0.get(&Position { x: 3, y: 1 }),
+        Some(&BlizzardsAtPos::One(West))
+    );
     let pos1 = weather.blizzard_positions(1, 5, 1);
     dbg!(&pos1);
     // #####
     // #.2.#
     // #####
-    assert_eq!(
-        pos1.get(&Position { x: 2, y: 1 }).unwrap_or(&vec![]).len(),
-        2
-    );
+    assert_eq!(pos1.get(&Position { x: 2, y: 1 }).unwrap().len(), 2);
     let pos2 = weather.blizzard_positions(1, 5, 2);
     dbg!(&pos2);
     // #####
     // #<.>#
     // #####
-    assert_eq!(pos2.get(&Position { x: 1, y: 1 }), Some(&vec![West]));
-    assert_eq!(pos2.get(&Position { x: 3, y: 1 }), Some(&vec![East]));
+    assert_eq!(
+        pos2.get(&Position { x: 1, y: 1 }),
+        Some(&BlizzardsAtPos::One(West))
+    );
+    assert_eq!(
+        pos2.get(&Position { x: 3, y: 1 }),
+        Some(&BlizzardsAtPos::One(East))
+    );
     let pos3 = weather.blizzard_positions(1, 5, 3);
     dbg!(&pos3);
     // #####
     // #>.<#
     // #####
-    assert_eq!(pos3.get(&Position { x: 1, y: 1 }), Some(&vec![East]));
-    assert_eq!(pos3.get(&Position { x: 3, y: 1 }), Some(&vec![West]));
+    assert_eq!(
+        pos3.get(&Position { x: 1, y: 1 }),
+        Some(&BlizzardsAtPos::One(East))
+    );
+    assert_eq!(
+        pos3.get(&Position { x: 3, y: 1 }),
+        Some(&BlizzardsAtPos::One(West))
+    );
 }
 
 #[test]
@@ -151,15 +209,15 @@ fn test_example_blizzards_1() {
     let positions = weather.blizzard_positions(6, 8, 1);
     assert_eq!(
         positions.get(&Position { x: 2, y: 1 }),
-        Some(&vec![CompassDirection::East])
+        Some(&BlizzardsAtPos::One(CompassDirection::East))
     );
     assert_eq!(
         positions.get(&Position { x: 5, y: 1 }),
-        Some(&vec![CompassDirection::West])
+        Some(&BlizzardsAtPos::One(CompassDirection::West))
     );
     assert_eq!(
-        positions.get(&Position { x: 3, y: 1 }).map(|v| v.len()),
-        Some(3)
+        positions.get(&Position { x: 3, y: 1 }),
+        Some(&BlizzardsAtPos::Several(3))
     );
 }
 
@@ -173,17 +231,23 @@ struct Valley {
 
 impl Valley {
     fn is_valid_position(&self, pos: &Position) -> bool {
-        if pos.x <= 0 {
+        if self.is_exit(pos) || self.is_entrance(pos) {
+            true
+        } else if pos.y < 1 || pos.x < 1 {
             false
-        } else if pos.y < 0 {
+        } else if pos.y >= self.length - 1 || pos.x >= self.width - 1 {
             false
-        } else if pos.y == 0 {
-            pos.x == self.entrance
-        } else if pos.y == self.length {
-            pos.x == self.exit
         } else {
-            pos.x < self.width && pos.y < self.length
+            true
         }
+    }
+
+    fn is_entrance(&self, pos: &Position) -> bool {
+        pos.y == 0 && pos.x == self.entrance
+    }
+
+    fn is_exit(&self, pos: &Position) -> bool {
+        pos.y == self.length - 1 && pos.x == self.exit
     }
 
     fn neighbours(&self, pos: &Position) -> Vec<Position> {
@@ -195,6 +259,7 @@ impl Valley {
             .collect()
     }
 
+    #[cfg(test)]
     fn to_string(&self, expedition: &Position, weather: &Weather, minute: i64) -> String {
         let mut result: String =
             String::with_capacity((self.width as usize + 3) * (self.length as usize + 1));
@@ -220,7 +285,7 @@ impl Valley {
                 .collect()
         };
 
-        let blizzards: HashMap<Position, Vec<CompassDirection>> =
+        let blizzards: HashMap<Position, BlizzardsAtPos> =
             weather.blizzard_positions(self.length, self.width, minute);
         for y in 0..self.length {
             let expcol = if expedition.y == y {
@@ -254,26 +319,9 @@ impl Valley {
                     None => {
                         result.push('.');
                     }
-                    Some(v) => match v.as_slice() {
-                        [] => {
-                            panic!("blizzard positions should not contain empty elements");
-                        }
-                        [only] => {
-                            result.push_str(match only {
-                                North => "^",
-                                South => "v",
-                                East => ">",
-                                West => "<",
-                            });
-                        }
-                        _ => {
-                            let s = format!("{}", v.len());
-                            if s.len() > 1 {
-                                panic!("too many superimposed storms");
-                            }
-                            result.push_str(s.as_str());
-                        }
-                    },
+                    Some(bp) => {
+                        result.push(bp.as_char());
+                    }
                 }
             }
             result.push('\n');
@@ -339,6 +387,7 @@ fn parse_input(s: &str) -> Result<(Valley, Weather), Fail> {
     Ok((valley, weather))
 }
 
+#[cfg(test)]
 fn example() -> &'static str {
     concat!(
         "#.######\n",
@@ -474,7 +523,7 @@ fn test_display_9() {
     );
 }
 
-fn bfs<NF>(start: Position, goal: Position, neighbours: NF) -> Option<(i64, Vec<Position>)>
+fn bfs<NF>(start: Position, goal: Position, neighbours: NF) -> Option<i64>
 where
     NF: Fn(Position, i64) -> Vec<Position>,
 {
@@ -489,20 +538,15 @@ where
             frontier.len()
         );
 
-        let mut next_frontier: BTreeSet<Position> = BTreeSet::new();
-        while let Some(p) = frontier.pop_first() {
-            if p == goal {
-                return Some((minute, vec![]));
-            }
-            let nv = neighbours(p, minute + 1);
-            next_frontier.extend(nv.iter());
+        if frontier.contains(&goal) {
+            return Some(minute);
         }
+
         minute += 1;
-        println!(
-            "copying {} entries from next_frontier to frontier",
-            next_frontier.len()
-        );
-        assert!(frontier.is_empty());
+        let next_frontier: BTreeSet<Position> = frontier
+            .iter()
+            .flat_map(|p| neighbours(*p, minute))
+            .collect();
         frontier = next_frontier;
     }
     None
@@ -523,13 +567,7 @@ fn solve_part1(valley: &Valley, weather: &Weather) -> Option<i64> {
         x: valley.exit,
         y: valley.length - 1,
     };
-    match bfs(start, goal, neighbours) {
-        Some((minutes, path)) => {
-            dbg!(&path);
-            Some(minutes)
-        }
-        None => None,
-    }
+    bfs(start, goal, neighbours)
 }
 
 #[test]
