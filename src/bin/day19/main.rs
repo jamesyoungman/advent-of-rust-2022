@@ -1,4 +1,5 @@
 use std::cmp::{Ordering, Reverse};
+use std::fmt::{Display, Formatter};
 use std::ops::{Index, IndexMut};
 use std::str;
 
@@ -17,6 +18,17 @@ enum RobotType {
     Geode,
 }
 use RobotType::*;
+
+impl Display for RobotType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Ore => "ore",
+            Clay => "clay",
+            Obsidian => "obsidian",
+            Geode => "geode",
+        })
+    }
+}
 
 const ALL_ROBOT_TYPES: [RobotType; 4] = [Ore, Clay, Obsidian, Geode];
 
@@ -89,6 +101,15 @@ impl Index<&RobotType> for Blueprint {
             RobotType::Obsidian => &self.obsidian_robot,
             RobotType::Geode => &self.geode_robot,
         }
+    }
+}
+
+impl Blueprint {
+    fn any_recipe_requiring_more_than(&self, rt: &RobotType, n: StockCount) -> Option<RobotType> {
+        ALL_ROBOT_TYPES
+            .iter()
+            .copied()
+            .find(|robot| self[*robot].costs[rt] > n)
     }
 }
 
@@ -274,13 +295,52 @@ impl Scored for State {
 }
 
 impl State {
-    fn possible_actions(&self, blueprint: &Blueprint) -> Vec<(State, Action)> {
+    fn select_action(&self, action: Action, blueprint: &Blueprint) -> (State, Action) {
+        (self.with_action(&action, blueprint), action)
+    }
+
+    fn possible_actions(
+        &self,
+        blueprint: &Blueprint,
+        minutes_remaining: usize,
+    ) -> Vec<(State, Action)> {
+        if minutes_remaining <= 1 {
+            // There's no point building anything, because the
+            // resulting robot would have no time to do anything.
+            return vec![self.select_action(Action::Idle, blueprint)];
+        }
+
+        //if self
+        //    .ores
+        //    .is_sufficient_for(&blueprint[RobotType::Geode].costs)
+        //{
+        //    // We can build a geode robot, so always prefer that.
+        //    // (this may not be a correct idea)
+        //    return vec![select_action(&Action::Build(RobotType::Geode))];
+        //}
+
         let mut result = Vec::with_capacity(ALL_ROBOT_TYPES.len() + 1);
         for rt in ALL_ROBOT_TYPES.iter().rev() {
             let cost: &Stock = &blueprint[rt].costs;
             if self.ores.is_sufficient_for(cost) {
-                let action = Action::Build(*rt);
-                result.push((self.with_action(&action, blueprint), action));
+                if rt == &RobotType::Geode {
+                    result.push(self.select_action(Action::Build(*rt), blueprint));
+                } else {
+                    // We could build a robot of type `rt`.  But if we
+                    // already have N such robots, this is only useful if
+                    // the blueprint contains at least one robot type
+                    // which needs more than N units of that resource.
+                    // This is so because we will already get N units of
+                    // the resource each turn,m and can never use up more
+                    // than N units per turn.
+                    let robots_onhand = self.robots[rt];
+                    if blueprint
+                        .any_recipe_requiring_more_than(rt, robots_onhand)
+                        .is_some()
+                    {
+                        result.push(self.select_action(Action::Build(*rt), blueprint));
+                    }
+                }
             }
         }
         result.push((self.with_action(&Action::Idle, blueprint), Action::Idle));
@@ -393,9 +453,11 @@ fn solve_bruteforce(
             total_robots: state.total_robots(),
         })
     } else {
-        let best: Option<Solution> =
-            select_best(state.possible_actions(blueprint).into_iter().filter_map(
-                |(state, action)| {
+        let best: Option<Solution> = select_best(
+            state
+                .possible_actions(blueprint, minutes_remaining)
+                .into_iter()
+                .filter_map(|(state, action)| {
                     if let Some(mut sol) = solve_bruteforce(state, blueprint, minutes_remaining - 1)
                     {
                         sol.actions.push(action);
@@ -403,8 +465,8 @@ fn solve_bruteforce(
                     } else {
                         None
                     }
-                },
-            ));
+                }),
+        );
         if let Some(b) = best.as_ref() {
             println!(
                 "best solution at {} minutes remaining yields {}",
@@ -510,7 +572,9 @@ fn solve_branch_and_bound(
         let mut pruned: usize = 0;
         let mut fanout: usize = 0;
         if node.minutes_remaining > 0 {
-            let actions = node.state.possible_actions(blueprint);
+            let actions = node
+                .state
+                .possible_actions(blueprint, node.minutes_remaining);
             //println!("branch: there are {} possible actions", actions.len());
             for (next_state, action) in actions {
                 let ub = next_state.naive_upper_bound(node.minutes_remaining - 1);
