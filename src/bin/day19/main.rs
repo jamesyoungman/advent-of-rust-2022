@@ -1,4 +1,4 @@
-use std::cmp::{Ordering, Reverse};
+use std::cmp::Reverse;
 use std::fmt::{Display, Formatter};
 use std::ops::{Index, IndexMut};
 use std::str;
@@ -295,36 +295,28 @@ impl Scored for State {
 }
 
 impl State {
-    fn select_action(&self, action: Action, blueprint: &Blueprint) -> (State, Action) {
-        (self.with_action(&action, blueprint), action)
-    }
-
-    fn possible_actions(
+    fn possible_next_states(
         &self,
         blueprint: &Blueprint,
         minutes_remaining: usize,
-    ) -> Vec<(State, Action)> {
+    ) -> Vec<(State, Vec<Action>)> {
+        let select_actions = |actions: Vec<Action>| -> (State, Vec<Action>) {
+            let next_state = self.with_actions(&actions, blueprint);
+            (next_state, actions)
+        };
+
         if minutes_remaining <= 1 {
             // There's no point building anything, because the
             // resulting robot would have no time to do anything.
-            return vec![self.select_action(Action::Idle, blueprint)];
+            return vec![select_actions(vec![Action::Idle])];
         }
-
-        //if self
-        //    .ores
-        //    .is_sufficient_for(&blueprint[RobotType::Geode].costs)
-        //{
-        //    // We can build a geode robot, so always prefer that.
-        //    // (this may not be a correct idea)
-        //    return vec![select_action(&Action::Build(RobotType::Geode))];
-        //}
 
         let mut result = Vec::with_capacity(ALL_ROBOT_TYPES.len() + 1);
         for rt in ALL_ROBOT_TYPES.iter().rev() {
             let cost: &Stock = &blueprint[rt].costs;
             if self.ores.is_sufficient_for(cost) {
                 if rt == &RobotType::Geode {
-                    result.push(self.select_action(Action::Build(*rt), blueprint));
+                    result.push(select_actions(vec![Action::Build(*rt)]));
                 } else {
                     // We could build a robot of type `rt`.  But if we
                     // already have N such robots, this is only useful if
@@ -338,12 +330,15 @@ impl State {
                         .any_recipe_requiring_more_than(rt, robots_onhand)
                         .is_some()
                     {
-                        result.push(self.select_action(Action::Build(*rt), blueprint));
+                        result.push(select_actions(vec![Action::Build(*rt)]));
                     }
                 }
             }
         }
-        result.push((self.with_action(&Action::Idle, blueprint), Action::Idle));
+        result.push((
+            self.with_actions(&[Action::Idle], blueprint),
+            vec![Action::Idle],
+        ));
         result
     }
 
@@ -378,10 +373,11 @@ impl State {
         self.complete_build(action);
     }
 
-    fn with_action(&self, action: &Action, blueprint: &Blueprint) -> State {
-        let mut updated = self.clone();
-        updated.simulate_action(action, blueprint);
-        updated
+    fn with_actions(&self, actions: &[Action], blueprint: &Blueprint) -> State {
+        actions.iter().fold(self.clone(), |mut state, action| {
+            state.simulate_action(action, blueprint);
+            state
+        })
     }
 
     /// Returns a naive upper bound on the maximum number of geodes
@@ -455,12 +451,13 @@ fn solve_bruteforce(
     } else {
         let best: Option<Solution> = select_best(
             state
-                .possible_actions(blueprint, minutes_remaining)
+                .possible_next_states(blueprint, minutes_remaining)
                 .into_iter()
-                .filter_map(|(state, action)| {
-                    if let Some(mut sol) = solve_bruteforce(state, blueprint, minutes_remaining - 1)
+                .filter_map(|(state, actions)| {
+                    if let Some(mut sol) =
+                        solve_bruteforce(state, blueprint, minutes_remaining - actions.len())
                     {
-                        sol.actions.push(action);
+                        sol.actions.extend(actions);
                         Some(sol)
                     } else {
                         None
@@ -485,13 +482,13 @@ struct BranchBoundNode {
 }
 
 impl BranchBoundNode {
-    fn with_action(&self, action: &Action, blueprint: &Blueprint) -> BranchBoundNode {
-        let state = self.state.with_action(action, blueprint);
+    fn with_actions(&self, actions: Vec<Action>, blueprint: &Blueprint) -> BranchBoundNode {
+        let state = self.state.with_actions(&actions, blueprint);
         BranchBoundNode {
             partial_solution: Solution {
                 actions: {
                     let mut v = self.partial_solution.actions.clone();
-                    v.push(action.clone());
+                    v.extend(actions);
                     v
                 },
                 score: state.score(),
@@ -529,27 +526,66 @@ fn construct_worst_solution(state: State, minutes_remaining: usize) -> BranchBou
 struct Priority {
     score: StockCount,
     total_robots: StockCount,
+    minutes_used: usize,
 }
 
-fn rev_priority<S: Scored>(thing: &S) -> Reverse<Priority> {
+fn rev_priority<S: Scored>(thing: &S, minutes_used: usize) -> Reverse<Priority> {
     Reverse(Priority {
         score: thing.score(),
         total_robots: thing.total_robots(),
+        minutes_used,
     })
+}
+
+fn branch(
+    node: &BranchBoundNode,
+    current_optimum: &BranchBoundNode,
+    blueprint: &Blueprint,
+    total_minutes: usize,
+    pq: &mut PriorityQueue<BranchBoundNode, Reverse<Priority>>,
+) -> usize {
+    let mut pruned: usize = 0;
+    let mut fanout: usize = 0;
+    if node.minutes_remaining > 0 {
+        for (next_state, actions) in node
+            .state
+            .possible_next_states(blueprint, node.minutes_remaining)
+        {
+            let ub = next_state.naive_upper_bound(node.minutes_remaining - actions.len());
+            let current = current_optimum.state.score();
+            if ub < current {
+                // the bound on this node idndicates that it cannot be worth pursuing.
+                println!("pruning because {ub} < {current}");
+                pruned += 1;
+            } else {
+                let next = node.with_actions(actions, blueprint);
+                let minutes_used = total_minutes - node.minutes_remaining;
+                let reversed_pri = rev_priority(&next.partial_solution, minutes_used);
+                pq.push(next, reversed_pri);
+                fanout += 1;
+            }
+        }
+        //println!("branch: fanout is {fanout}");
+    } else {
+        //println!("branch: no time left");
+    }
+    pruned
 }
 
 fn solve_branch_and_bound(
     state: State,
     blueprint: &Blueprint,
-    minutes_remaining: usize,
-) -> Solution {
+    initial_minutes_remaining: usize,
+) -> Option<Solution> {
     println!("solving for blueprint {}", blueprint.id);
-    assert!(minutes_remaining > 0);
+    assert!(initial_minutes_remaining > 0);
     let mut prune_count: usize = 0;
-    let mut current_optimum: BranchBoundNode =
-        dbg!(construct_worst_solution(state.clone(), minutes_remaining));
+    let mut current_optimum: BranchBoundNode = dbg!(construct_worst_solution(
+        state.clone(),
+        initial_minutes_remaining
+    ));
     let mut pq: PriorityQueue<BranchBoundNode, Reverse<Priority>> = PriorityQueue::new();
-    let initial_rp = rev_priority(&state);
+    let initial_rp = rev_priority(&state, 0);
     let state_score = state.score();
     let total_robots = state.total_robots();
     let initial = BranchBoundNode {
@@ -559,45 +595,16 @@ fn solve_branch_and_bound(
             total_robots,
         },
         state,
-        minutes_remaining,
+        minutes_remaining: initial_minutes_remaining,
     };
     pq.push(initial, initial_rp);
 
-    fn branch(
-        node: &BranchBoundNode,
-        current_optimum: &BranchBoundNode,
-        blueprint: &Blueprint,
-        pq: &mut PriorityQueue<BranchBoundNode, Reverse<Priority>>,
-    ) -> usize {
-        let mut pruned: usize = 0;
-        let mut fanout: usize = 0;
-        if node.minutes_remaining > 0 {
-            let actions = node
-                .state
-                .possible_actions(blueprint, node.minutes_remaining);
-            //println!("branch: there are {} possible actions", actions.len());
-            for (next_state, action) in actions {
-                let ub = next_state.naive_upper_bound(node.minutes_remaining - 1);
-                let current = current_optimum.state.score();
-                if ub < current {
-                    // the bound on this node idndicates that it cannot be worth pursuing.
-                    //println!("pruning because {ub} < {current}");
-                    pruned += 1;
-                } else {
-                    let next = node.with_action(&action, blueprint);
-                    let reversed_pri = rev_priority(&next.partial_solution);
-                    pq.push(next, reversed_pri);
-                    fanout += 1;
-                }
-            }
-            //println!("branch: fanout is {fanout}");
-        } else {
-            //println!("branch: no time left");
+    let mut iterations: usize = 0;
+    while let Some((partial_node, _reversed_score)) = pq.pop() {
+        iterations += 1;
+        if iterations > 100_000 {
+            return None;
         }
-        pruned
-    }
-
-    while let Some((partial_node, reversed_score)) = pq.pop() {
         //println!(
         //    "considering partial_node {partial_node:?} with score {} and reversed_score {:?}...",
         //    partial_node.state.score(),
@@ -605,7 +612,7 @@ fn solve_branch_and_bound(
         //);
         let single = partial_node
             .partial_solution
-            .is_single_candidate(minutes_remaining);
+            .is_single_candidate(initial_minutes_remaining);
         let better = partial_node.state.score() > current_optimum.state.score();
         let interesting = partial_node.state.score() > 0 || current_optimum.state.score() > 0;
         if single {
@@ -624,14 +631,20 @@ fn solve_branch_and_bound(
             }
         } else {
             //println!("solve_branch_and_bound: branching on {partial_node:?}");
-            prune_count += branch(&partial_node, &current_optimum, blueprint, &mut pq);
+            prune_count += branch(
+                &partial_node,
+                &current_optimum,
+                blueprint,
+                initial_minutes_remaining,
+                &mut pq,
+            );
         }
     }
     println!("{prune_count} branches were pruned");
     assert!(current_optimum
         .partial_solution
-        .is_single_candidate(minutes_remaining));
-    current_optimum.partial_solution
+        .is_single_candidate(initial_minutes_remaining));
+    Some(current_optimum.partial_solution)
 }
 
 //#[cfg(test)]
@@ -752,7 +765,14 @@ fn blueprint_1_max_6() {
 
     let bb_solution = solve_branch_and_bound(state, blueprint, 7);
     dbg!(&bb_solution);
-    assert_eq!(bb_solution.score, 9);
+    match bb_solution {
+        Some(solution) => {
+            assert_eq!(solution.score, 9);
+        }
+        None => {
+            panic!("could not solve the 7-minute-only problem");
+        }
+    }
 }
 
 impl Scored for (&Blueprint, Solution) {
@@ -769,33 +789,38 @@ fn quality_level(bp_id: u32, score: StockCount) -> i64 {
     i64::from(bp_id) * i64::from(score)
 }
 
-fn solve_part1(s: &str) -> i64 {
+fn solve_part1(s: &str) -> Option<i64> {
     let blueprints = parse_blueprints(s);
     let initial_state = State::default();
     let solutions: Vec<(&Blueprint, Solution)> = blueprints
         .iter()
-        .map(|bp| (bp, solve_branch_and_bound(initial_state.clone(), bp, 24)))
-        .inspect(|(bp, sol)| {
-            println!(
-                "blueprint {} has quality level {}",
-                bp.id,
-                quality_level(bp.id, sol.score())
-            )
+        .map(|bp| {
+            println!("solving blueprint {}...", bp.id);
+            solve_branch_and_bound(initial_state.clone(), bp, 24).map(|solution| (bp, solution))
         })
+        .filter_map(|sol| sol)
         .collect();
-    solutions
-        .iter()
-        .map(|(bp, solution)| quality_level(bp.id, solution.score()))
-        .sum()
+    if solutions.len() < blueprints.len() {
+        println!("some blueprints could not be solved");
+        None
+    } else {
+        Some(
+            solutions
+                .iter()
+                .map(|(bp, solution)| quality_level(bp.id, solution.score()))
+                .sum(),
+        )
+    }
 }
 
 //#[test]
 fn test_solve_part1() {
     let example = example_blueprint_string();
-    assert_eq!(solve_part1(example), 33);
+    assert_eq!(solve_part1(example), Some(33));
 }
 
 fn main() {
     //let input = str::from_utf8(include_bytes!("input.txt")).expect("valid input");
-    test_solve_part1()
+    let example = example_blueprint_string();
+    println!("{:?}", solve_part1(example));
 }
