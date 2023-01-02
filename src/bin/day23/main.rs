@@ -5,7 +5,7 @@ use std::{
 };
 
 use lib::error::Fail;
-use lib::grid::{bounds, CompassDirection, Position};
+use lib::grid::{bounds, BoundingBox, CompassDirection, Position};
 
 struct Grove {
     occupied: HashSet<Position>,
@@ -161,11 +161,10 @@ fn count_proposed_occupancies(
 
 impl Grove {
     #[cfg(test)]
-    fn render_as_string(&self, bounds: &(Position, Position)) -> String {
-        let (top_left, bottom_right) = bounds;
+    fn render_as_string(&self, bounds: &BoundingBox) -> String {
         let mut result = String::with_capacity(
-            usize::try_from(bottom_right.y - top_left.y).unwrap_or(0)
-                * usize::try_from(bottom_right.x - top_left.x + 1).unwrap_or(0),
+            usize::try_from(bounds.bottom_right.y - bounds.top_left.y).unwrap_or(0)
+                * usize::try_from(bounds.bottom_right.x - bounds.top_left.x + 1).unwrap_or(0),
         );
         let emit = |ch| -> Result<(), ()> {
             result.push(ch);
@@ -175,13 +174,12 @@ impl Grove {
         result
     }
 
-    fn render<F, E>(&self, bounds: &(Position, Position), mut output: F) -> Result<(), E>
+    fn render<F, E>(&self, bounds: &BoundingBox, mut output: F) -> Result<(), E>
     where
         F: FnMut(char) -> Result<(), E>,
     {
-        let (top_left, bottom_right) = bounds;
-        for y in (top_left.y)..=(bottom_right.y) {
-            for x in (top_left.x)..=(bottom_right.x) {
+        for y in (bounds.top_left.y)..=(bounds.bottom_right.y) {
+            for x in (bounds.top_left.x)..=(bounds.bottom_right.x) {
                 output(if self.occupied.contains(&Position { x, y }) {
                     '#'
                 } else {
@@ -268,11 +266,11 @@ impl Grove {
 
     fn area_occupied_by_elves(&self) -> usize {
         match bounds(self.occupied.iter()) {
-            Some((top_left, bot_right)) => {
-                let width: usize = (bot_right.x - top_left.x)
+            Some(bounding_box) => {
+                let width: usize = (bounding_box.bottom_right.x - bounding_box.top_left.x)
                     .try_into()
                     .expect("x bounds should not be reversed");
-                let height: usize = (bot_right.y - top_left.y)
+                let height: usize = (bounding_box.bottom_right.y - bounding_box.top_left.y)
                     .try_into()
                     .expect("y bounds should not be reversed");
                 width * height
@@ -313,11 +311,7 @@ fn large_example() -> &'static str {
 }
 
 #[cfg(test)]
-fn check_iteration_stage_rendering(
-    mut grove: Grove,
-    expected: &[String],
-    bounds: &(Position, Position),
-) {
+fn check_iteration_stage_rendering(mut grove: Grove, expected: &[String], bounds: &BoundingBox) {
     for (iteration, expected_image) in expected.iter().enumerate() {
         let got = grove.render_as_string(bounds);
         println!(
@@ -378,8 +372,11 @@ fn test_small_example() {
         ]
         .join("\n"),
     ];
-    let bounds: &(Position, Position) = &(Position { x: 0, y: 0 }, Position { x: 4, y: 5 });
-    check_iteration_stage_rendering(grove, &expected, bounds);
+    let bounds = BoundingBox {
+        top_left: Position { x: 0, y: 0 },
+        bottom_right: Position { x: 4, y: 5 },
+    };
+    check_iteration_stage_rendering(grove, &expected, &bounds);
 }
 
 #[test]
@@ -478,8 +475,11 @@ fn test_large_example() {
         ]
         .join("\n"),
     ];
-    let bounds: &(Position, Position) = &(Position { x: 0, y: 0 }, Position { x: 13, y: 11 });
-    check_iteration_stage_rendering(grove, &expected, bounds);
+    let bounds = BoundingBox {
+        top_left: Position { x: 0, y: 0 },
+        bottom_right: Position { x: 13, y: 11 },
+    };
+    check_iteration_stage_rendering(grove, &expected, &bounds);
 }
 
 fn solve_part1(s: &str) -> (usize, Grove) {

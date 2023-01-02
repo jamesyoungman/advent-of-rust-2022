@@ -142,7 +142,12 @@ pub fn update_max(max: &mut i64, val: i64) {
     }
 }
 
-pub fn bounds<'a, I>(points: I) -> Option<(Position, Position)>
+pub struct BoundingBox {
+    pub top_left: Position,
+    pub bottom_right: Position,
+}
+
+pub fn bounds<'a, I>(points: I) -> Option<BoundingBox>
 where
     I: IntoIterator<Item = &'a Position>,
 {
@@ -157,11 +162,10 @@ where
         maybe_update_max(&mut max_y, p.y);
     }
     match (min_x, max_x, min_y, max_y) {
-        (Some(xlow), Some(xhigh), Some(ylow), Some(yhigh)) => {
-            let min: Position = Position { x: xlow, y: ylow };
-            let max: Position = Position { x: xhigh, y: yhigh };
-            Some((min, max))
-        }
+        (Some(xlow), Some(xhigh), Some(ylow), Some(yhigh)) => Some(BoundingBox {
+            top_left: Position { x: xlow, y: ylow },
+            bottom_right: Position { x: xhigh, y: yhigh },
+        }),
         _ => None,
     }
 }

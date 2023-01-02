@@ -5,7 +5,7 @@ use std::str;
 use regex::Regex;
 
 use lib::error::Fail;
-use lib::grid::{bounds, CompassDirection, Position};
+use lib::grid::{bounds, BoundingBox, CompassDirection, Position};
 
 #[cfg(test)]
 fn example() -> &'static str {
@@ -35,16 +35,15 @@ enum Cell {
 
 struct Grid {
     cells: HashMap<Position, Cell>,
-    top_left: Position,
-    bottom_right: Position,
+    bbox: BoundingBox,
 }
 
 impl Grid {
     fn start_position(&self) -> Position {
-        ((self.top_left.x)..=(self.bottom_right.x))
+        ((self.bbox.top_left.x)..=(self.bbox.bottom_right.x))
             .map(|x| Position {
                 x,
-                y: self.top_left.y,
+                y: self.bbox.top_left.y,
             })
             .find(|pos: &Position| self.cells.contains_key(pos))
             .expect("at least one cell on the top row should be occupied")
@@ -70,24 +69,24 @@ impl Grid {
     fn bounds_wrap(&self, pos: Position) -> Position {
         // We wrap in each direction separately since diagonal moves
         // are not allowed.
-        if pos.x > self.bottom_right.x {
+        if pos.x > self.bbox.bottom_right.x {
             Position {
-                x: self.top_left.x,
+                x: self.bbox.top_left.x,
                 ..pos
             }
-        } else if pos.y > self.bottom_right.y {
+        } else if pos.y > self.bbox.bottom_right.y {
             Position {
-                y: self.top_left.y,
+                y: self.bbox.top_left.y,
                 ..pos
             }
-        } else if pos.x < self.top_left.x {
+        } else if pos.x < self.bbox.top_left.x {
             Position {
-                x: self.bottom_right.x,
+                x: self.bbox.bottom_right.x,
                 ..pos
             }
-        } else if pos.y < self.top_left.y {
+        } else if pos.y < self.bbox.top_left.y {
             Position {
-                y: self.bottom_right.y,
+                y: self.bbox.bottom_right.y,
                 ..pos
             }
         } else {
@@ -133,11 +132,7 @@ impl TryFrom<&str> for Grid {
             .flat_map(|(y, line)| build_line(y, line))
             .collect();
         match bounds(cells.keys()) {
-            Some((top_left, bottom_right)) => Ok(Grid {
-                cells,
-                top_left,
-                bottom_right,
-            }),
+            Some(bbox) => Ok(Grid { cells, bbox }),
             None => Err(Fail("grid is empty".to_string())),
         }
     }

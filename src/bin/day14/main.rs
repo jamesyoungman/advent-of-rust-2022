@@ -5,7 +5,7 @@ use std::{
 };
 
 use lib::error::Fail;
-use lib::grid::{bounds, update_max, update_min, Position};
+use lib::grid::{bounds, update_max, update_min, BoundingBox, Position};
 
 #[derive(Debug, PartialEq, Eq)]
 enum Part {
@@ -80,53 +80,67 @@ impl Cave {
         }
     }
 
-    fn bounds(&self) -> (Position, Position) {
+    fn bounds(&self) -> BoundingBox {
         fn expand_bounds(
             minpos: &mut Position,
             maxpos: &mut Position,
             candidate_min: Position,
             candidate_max: Position,
-        ) -> (Position, Position) {
+        ) -> BoundingBox {
             update_min(&mut minpos.x, candidate_min.x);
             update_min(&mut minpos.y, candidate_min.y);
             update_max(&mut maxpos.x, candidate_max.x);
             update_max(&mut maxpos.y, candidate_max.y);
-            (*minpos, *maxpos)
+            BoundingBox {
+                top_left: *minpos,
+                bottom_right: *maxpos,
+            }
         }
 
         let mut top_left = Position {
             x: self.source.x,
             y: self.source.y,
         };
-        let mut bot_right = Position {
+        let mut bottom_right = Position {
             x: self.source.x,
             y: self.source.y,
         };
-        if let Some((structure_top_left, structure_bottom_right)) = bounds(self.structures.iter()) {
+        if let Some(BoundingBox {
+            top_left: structure_top_left,
+            bottom_right: structure_bottom_right,
+        }) = bounds(self.structures.iter())
+        {
             expand_bounds(
                 &mut top_left,
-                &mut bot_right,
+                &mut bottom_right,
                 structure_top_left,
                 structure_bottom_right,
             );
         }
-        if let Some((sand_top_left, sand_bottom_right)) = bounds(self.sand.iter()) {
+        if let Some(BoundingBox {
+            top_left: sand_top_left,
+            bottom_right: sand_bottom_right,
+        }) = bounds(self.sand.iter())
+        {
             expand_bounds(
                 &mut top_left,
-                &mut bot_right,
+                &mut bottom_right,
                 sand_top_left,
                 sand_bottom_right,
             );
         }
-        (top_left, bot_right)
+        BoundingBox {
+            top_left,
+            bottom_right,
+        }
     }
 }
 
 impl Display for Cave {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-        let (top_left, bottom_right) = self.bounds();
-        for y in (top_left.y)..=(bottom_right.y) {
-            for x in (top_left.x)..=(bottom_right.x) {
+        let bbox = self.bounds();
+        for y in (bbox.top_left.y)..=(bbox.bottom_right.y) {
+            for x in (bbox.top_left.x)..=(bbox.bottom_right.x) {
                 write!(f, "{}", self.display_char(&Position { x, y }))?;
             }
             f.write_str("\n")?;
@@ -179,7 +193,10 @@ impl TryFrom<&str> for Cave {
             structures.extend(structure.drain());
         }
         let floor_level = match bounds(structures.iter()) {
-            Some((_, bottom_right)) => bottom_right.y + 2,
+            Some(BoundingBox {
+                top_left: _,
+                bottom_right,
+            }) => bottom_right.y + 2,
             None => return Err(Fail("cave contains no structures".to_string())),
         };
         Ok(Cave {
@@ -193,7 +210,10 @@ impl TryFrom<&str> for Cave {
 
 fn solve(cave: &mut Cave, part: &Part) -> usize {
     let lowest_y = match bounds(cave.structures.iter()) {
-        Some((_, bottom_right)) => bottom_right.y,
+        Some(BoundingBox {
+            top_left: _,
+            bottom_right,
+        }) => bottom_right.y,
         None => {
             // There are no structures in the cave.  So nothing to
             // come to rest on.
