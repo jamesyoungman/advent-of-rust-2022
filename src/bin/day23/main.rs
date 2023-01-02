@@ -567,9 +567,24 @@ fn test_solve_part1() {
     assert_eq!(110, area);
 }
 
+fn solve_part2(s: &str) -> usize {
+    let mut grove = Grove::try_from(s).expect("valid input");
+    for round in 1.. {
+        if !grove.iterate() {
+            return round;
+        }
+    }
+    unreachable!()
+}
+
+#[test]
+fn test_sove_part2() {
+    assert_eq!(solve_part2(large_example()), 20);
+}
+
 fn main() {
     let input = str::from_utf8(include_bytes!("input.txt")).expect("valid input");
-    // 6399 is wrong.
     let (area, _) = solve_part1(input);
     println!("Day 23 part 1: {area}");
+    println!("Day 23 part 2: {}", solve_part2(input));
 }
