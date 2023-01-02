@@ -531,7 +531,7 @@ fn test_large_example() {
     check_iteration_stage_rendering(grove, &expected, Some(&bounds));
 }
 
-fn solve_part1(s: &str) -> (usize, Grove) {
+fn solve_part1(s: &str) -> usize {
     let mut grove = Grove::try_from(s).expect("valid input");
     for _round in 0..10 {
         if !grove.iterate() {
@@ -540,31 +540,12 @@ fn solve_part1(s: &str) -> (usize, Grove) {
     }
     let total_area = grove.area_occupied_by_elves();
     let elf_count = grove.occupied.len();
-    let empty_ground_tiles = total_area - elf_count;
-    (empty_ground_tiles, grove)
+    total_area - elf_count
 }
 
 #[test]
 fn test_solve_part1() {
-    let (area, grove) = solve_part1(large_example());
-    let s = grove.to_string();
-    assert_eq!(
-        s,
-        concat!(
-            "......#.....\n",
-            "..........#.\n",
-            ".#.#..#.....\n",
-            ".....#......\n",
-            "..#.....#..#\n",
-            "#......##...\n",
-            "....##......\n",
-            ".#........#.\n",
-            "...#.#..#...\n",
-            "............\n",
-            "...#..#..#..\n"
-        )
-    );
-    assert_eq!(110, area);
+    assert_eq!(110, solve_part1(large_example()));
 }
 
 fn solve_part2(s: &str) -> usize {
@@ -584,7 +565,6 @@ fn test_sove_part2() {
 
 fn main() {
     let input = str::from_utf8(include_bytes!("input.txt")).expect("valid input");
-    let (area, _) = solve_part1(input);
-    println!("Day 23 part 1: {area}");
+    println!("Day 23 part 1: {}", solve_part1(input));
     println!("Day 23 part 2: {}", solve_part2(input));
 }
