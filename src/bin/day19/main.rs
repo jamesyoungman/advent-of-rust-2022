@@ -204,10 +204,36 @@ fn test_parse_blueprint() {
     );
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 enum Action {
     Build(RobotType),
-    Idle,
+    Idle(usize),
+}
+
+fn duration(actions: &[Action]) -> usize {
+    actions.iter().fold(0, |acc, action| {
+        acc + match action {
+            Action::Idle(t) => *t,
+            Action::Build(_) => 1,
+        }
+    })
+}
+
+fn minutes_needed_to_cover(
+    current: StockCount,
+    target: StockCount,
+    acquisition_rate: StockCount,
+) -> Option<usize> {
+    if current >= target {
+        Some(0) // we have enough on hand already
+    } else {
+        if acquisition_rate > 0 {
+            let shortfall = target - current;
+            usize::try_from(shortfall / acquisition_rate).ok()
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
@@ -219,6 +245,32 @@ impl Stock {
             .iter()
             .zip(cost.0.iter())
             .all(|(have, need)| have >= need)
+    }
+
+    /// Given current stock levels and already-built robots, compute
+    /// how long it will take for us to cover the cost of building
+    /// some other robot.  Return None if we cannot collect enough
+    /// material to build that robot, ever (e.g. because it requires
+    /// an ore we cannot collect yet).
+    fn minutes_needed_to_cover_cost(
+        &self,
+        target: &Self,
+        acquisition_rate: &Self,
+    ) -> Option<usize> {
+        let mut result: usize = usize::MAX;
+        for (i, rt) in ALL_ROBOT_TYPES.iter().enumerate() {
+            match minutes_needed_to_cover(self[rt], target[rt], acquisition_rate[rt]) {
+                None => {
+                    return None;
+                }
+                Some(t) => {
+                    if i == 0 || result < t {
+                        result = t;
+                    }
+                }
+            }
+        }
+        Some(result)
     }
 
     fn consume(&mut self, cost: &Self) {
@@ -300,15 +352,72 @@ impl State {
         blueprint: &Blueprint,
         minutes_remaining: usize,
     ) -> Vec<(State, Vec<Action>)> {
+        self.possible_next_states_bigsteps(blueprint, minutes_remaining)
+    }
+
+    fn possible_next_states_bigsteps(
+        &self,
+        blueprint: &Blueprint,
+        minutes_remaining: usize,
+    ) -> Vec<(State, Vec<Action>)> {
+        let select_actions = |actions: Vec<Action>| -> (State, Vec<Action>) {
+            assert!(duration(&actions) <= minutes_remaining);
+            let next_state = self.with_actions(&actions, blueprint);
+            (next_state, actions)
+        };
+
+        if minutes_remaining == 0 {
+            return vec![];
+        } else if minutes_remaining == 1 {
+            // There's no point building anything, because the
+            // resulting robot would have no time to do anything.
+            return vec![select_actions(vec![Action::Idle(1)])];
+        }
+        let mut result = Vec::with_capacity(ALL_ROBOT_TYPES.len() + 1);
+        for rt in ALL_ROBOT_TYPES.iter().rev() {
+            if let Some(t) = self
+                .ores
+                .minutes_needed_to_cover_cost(&blueprint[rt].costs, &self.robots)
+            {
+                // We can build a robot of type `rt` by waiting
+                // `t` minutes to accumulate the resources, then
+                // building.
+                if t < minutes_remaining {
+                    let mut actions = Vec::with_capacity(2);
+                    if t > 0 {
+                        // First gather the resources (if needed)...
+                        actions.push(Action::Idle(t));
+                    }
+                    actions.push(Action::Build(*rt)); // ... then build the robot.
+                    result.push(select_actions(actions));
+                }
+            }
+        }
+        if result.is_empty() {
+            // There was no robot type we could build by waiting.  So
+            // we cannot build any robot at all.  Therefore we must be
+            // idle for the rest of the available time.
+            result.push(select_actions(vec![Action::Idle(minutes_remaining)]));
+        }
+        result
+    }
+
+    fn possible_next_states_tinysteps(
+        &self,
+        blueprint: &Blueprint,
+        minutes_remaining: usize,
+    ) -> Vec<(State, Vec<Action>)> {
         let select_actions = |actions: Vec<Action>| -> (State, Vec<Action>) {
             let next_state = self.with_actions(&actions, blueprint);
             (next_state, actions)
         };
 
-        if minutes_remaining <= 1 {
+        if minutes_remaining < 1 {
+            return vec![];
+        } else if minutes_remaining == 1 {
             // There's no point building anything, because the
             // resulting robot would have no time to do anything.
-            return vec![select_actions(vec![Action::Idle])];
+            return vec![select_actions(vec![Action::Idle(1)])];
         }
 
         let mut result = Vec::with_capacity(ALL_ROBOT_TYPES.len() + 1);
@@ -336,8 +445,8 @@ impl State {
             }
         }
         result.push((
-            self.with_actions(&[Action::Idle], blueprint),
-            vec![Action::Idle],
+            self.with_actions(&[Action::Idle(1)], blueprint),
+            vec![Action::Idle(1)],
         ));
         result
     }
@@ -348,7 +457,7 @@ impl State {
                 let cost: &Stock = &blueprint[robot_type].costs;
                 self.ores.consume(cost);
             }
-            Action::Idle => (),
+            Action::Idle(_) => (),
         }
     }
 
@@ -357,20 +466,29 @@ impl State {
             Action::Build(robot_type) => {
                 self.robots[robot_type] += 1;
             }
-            Action::Idle => (),
+            Action::Idle(_) => (),
         }
     }
 
-    fn harvest_resources(&mut self) {
+    fn harvest_resources(&mut self, minutes: usize) {
+        let duration =
+            StockCount::try_from(minutes).expect("idle duration should be in range of StockCount");
         for rt in ALL_ROBOT_TYPES.iter() {
-            self.ores[rt] += self.robots[rt];
+            self.ores[rt] += self.robots[rt] * duration;
         }
     }
 
     fn simulate_action(&mut self, action: &Action, blueprint: &Blueprint) {
-        self.start_build(action, blueprint);
-        self.harvest_resources();
-        self.complete_build(action);
+        match &action {
+            Action::Build(_) => {
+                self.start_build(action, blueprint);
+                self.harvest_resources(1);
+                self.complete_build(action);
+            }
+            Action::Idle(n) => {
+                self.harvest_resources(*n);
+            }
+        }
     }
 
     fn with_actions(&self, actions: &[Action], blueprint: &Blueprint) -> State {
@@ -404,7 +522,7 @@ impl Solution {
     }
 
     fn is_single_candidate(&self, minutes_remaining: usize) -> bool {
-        self.actions.len() == minutes_remaining
+        duration(&self.actions) == minutes_remaining
     }
 }
 
@@ -454,9 +572,11 @@ fn solve_bruteforce(
                 .possible_next_states(blueprint, minutes_remaining)
                 .into_iter()
                 .filter_map(|(state, actions)| {
-                    if let Some(mut sol) =
-                        solve_bruteforce(state, blueprint, minutes_remaining - actions.len())
-                    {
+                    if let Some(mut sol) = solve_bruteforce(
+                        state,
+                        blueprint,
+                        dbg!(minutes_remaining) - dbg!(duration(&actions)),
+                    ) {
                         sol.actions.extend(actions);
                         Some(sol)
                     } else {
@@ -483,6 +603,7 @@ struct BranchBoundNode {
 
 impl BranchBoundNode {
     fn with_actions(&self, actions: Vec<Action>, blueprint: &Blueprint) -> BranchBoundNode {
+        let minutes_used = duration(&actions);
         let state = self.state.with_actions(&actions, blueprint);
         BranchBoundNode {
             partial_solution: Solution {
@@ -495,31 +616,28 @@ impl BranchBoundNode {
                 total_robots: state.total_robots(),
             },
             state,
-            minutes_remaining: self.minutes_remaining - 1,
+            minutes_remaining: self.minutes_remaining - minutes_used,
         }
     }
 }
 
-fn construct_worst_solution(state: State, minutes_remaining: usize) -> BranchBoundNode {
+fn construct_worst_solution(
+    state: State,
+    minutes_remaining: usize,
+    blueprint: &Blueprint,
+) -> BranchBoundNode {
     // Our worst solution is simply to do nothing.
-    let initial: BranchBoundNode = BranchBoundNode {
+    let idle_actions = vec![Action::Idle(minutes_remaining)];
+    let newstate = state.with_actions(&idle_actions, blueprint);
+    BranchBoundNode {
         partial_solution: Solution {
-            actions: Vec::new(),
-            score: state.score(),
-            total_robots: state.total_robots(),
+            actions: idle_actions,
+            score: newstate.score(),
+            total_robots: newstate.total_robots(),
         },
-        state,
-        minutes_remaining,
-    };
-
-    fn do_nothing(mut node: BranchBoundNode, time: usize) -> BranchBoundNode {
-        node.partial_solution.actions.push(Action::Idle);
-        node.state.harvest_resources();
-        node.partial_solution.score = node.state.score();
-        node.minutes_remaining = time;
-        node
+        state: newstate,
+        minutes_remaining: 0,
     }
-    (0..minutes_remaining).rev().fold(initial, do_nothing)
 }
 
 #[derive(PartialOrd, Ord, Eq, PartialEq, Debug)]
@@ -551,7 +669,7 @@ fn branch(
             .state
             .possible_next_states(blueprint, node.minutes_remaining)
         {
-            let ub = next_state.naive_upper_bound(node.minutes_remaining - actions.len());
+            let ub = next_state.naive_upper_bound(node.minutes_remaining - duration(&actions));
             let current = current_optimum.state.score();
             if ub < current {
                 // the bound on this node idndicates that it cannot be worth pursuing.
@@ -582,7 +700,8 @@ fn solve_branch_and_bound(
     let mut prune_count: usize = 0;
     let mut current_optimum: BranchBoundNode = dbg!(construct_worst_solution(
         state.clone(),
-        initial_minutes_remaining
+        initial_minutes_remaining,
+        blueprint
     ));
     let mut pq: PriorityQueue<BranchBoundNode, Reverse<Priority>> = PriorityQueue::new();
     let initial_rp = rev_priority(&state, 0);
@@ -599,12 +718,7 @@ fn solve_branch_and_bound(
     };
     pq.push(initial, initial_rp);
 
-    let mut iterations: usize = 0;
     while let Some((partial_node, _reversed_score)) = pq.pop() {
-        iterations += 1;
-        if iterations > 100_000 {
-            return None;
-        }
         //println!(
         //    "considering partial_node {partial_node:?} with score {} and reversed_score {:?}...",
         //    partial_node.state.score(),
@@ -621,13 +735,7 @@ fn solve_branch_and_bound(
                 current_optimum = partial_node;
                 dbg!(&current_optimum);
             } else {
-                // discard this node, we already have a better solution
-                if interesting {
-                    println!("solve_branch_and_bound: dropping {partial_node:?} because it is no better than {current_optimum:?} ({} vs {})",
-			     partial_node.state.score(),
-			     current_optimum.state.score(),
-		    );
-                }
+                prune_count += 1;
             }
         } else {
             //println!("solve_branch_and_bound: branching on {partial_node:?}");
@@ -681,7 +789,7 @@ fn example_walkthrough() {
     let blueprint = &example_blueprints()[0];
     let mut state = State::default();
     assert_eq!(state.robots[RobotType::Ore], 1);
-    state.simulate_action(&Action::Idle, &blueprint);
+    state.simulate_action(&Action::Idle(1), &blueprint);
     assert_eq!(
         state,
         State {
@@ -689,7 +797,7 @@ fn example_walkthrough() {
             robots: Stock::new(&[(RobotType::Ore, 1)]),
         }
     );
-    state.simulate_action(&Action::Idle, &blueprint);
+    state.simulate_action(&Action::Idle(1), &blueprint);
     assert_eq!(
         state,
         State {
