@@ -142,6 +142,7 @@ pub fn update_max(max: &mut i64, val: i64) {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct BoundingBox {
     pub top_left: Position,
     pub bottom_right: Position,

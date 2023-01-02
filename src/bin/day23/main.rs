@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeSet, HashMap},
     fmt::{Display, Formatter, Write},
     str,
 };
@@ -8,7 +8,7 @@ use lib::error::Fail;
 use lib::grid::{bounds, BoundingBox, CompassDirection, Position};
 
 struct Grove {
-    occupied: HashSet<Position>,
+    occupied: BTreeSet<Position>,
     direction_order: [CompassDirection; 4],
 }
 
@@ -16,7 +16,7 @@ impl Display for Grove {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match bounds(self.occupied.iter()) {
             None => Ok(()), // empty, nothing to display.
-            Some(bounds) => self.render(&bounds, |ch| f.write_char(ch)),
+            Some(bounds) => self.render(Some(&bounds), |ch| f.write_char(ch)),
         }
     }
 }
@@ -34,7 +34,7 @@ fn build_line(y: i64, line: &str) -> impl Iterator<Item = Position> + '_ {
 impl TryFrom<&str> for Grove {
     type Error = Fail;
     fn try_from(s: &str) -> Result<Grove, Fail> {
-        let occupied: HashSet<Position> = s
+        let occupied: BTreeSet<Position> = s
             .split_terminator('\n')
             .enumerate()
             .flat_map(|(y, line)| build_line(y as i64, line))
@@ -58,34 +58,35 @@ fn direction_qualifying_positions(pos: &Position, direction: &CompassDirection) 
             [
                 Position { x: pos.x - 1, y }, // NW
                 Position { x: pos.x, y },     // N
-                Position { x: pos.x + 1, y },
+                Position { x: pos.x + 1, y }, // NE
             ]
-        } // NW
+        }
         CompassDirection::East => {
             let x = pos.x + 1;
             [
                 Position { x, y: pos.y - 1 }, // NE
                 Position { x, y: pos.y },     // E
-                Position { x, y: pos.y + 1 },
+                Position { x, y: pos.y + 1 }, // SE
             ]
-        } // SE
+        }
         CompassDirection::South => {
             let y = pos.y + 1;
             [
-                Position { x: pos.x - 1, y }, // SE
+                Position { x: pos.x - 1, y }, // SW
                 Position { x: pos.x, y },     // S
-                Position { x: pos.x + 1, y },
+                Position { x: pos.x + 1, y }, // SE
             ]
-        } // SW
+        }
         CompassDirection::West => {
             let x = pos.x - 1;
             [
                 Position { x, y: pos.y - 1 }, // NW
                 Position { x, y: pos.y },     // W
-                Position { x, y: pos.y + 1 },
+                Position { x, y: pos.y + 1 }, // SW
             ]
-        } // SW
+        }
     };
+    // Sanity-check `result`.
     let dx: Vec<i64> = result.iter().map(|p| p.x - pos.x).collect();
     let dy: Vec<i64> = result.iter().map(|p| p.y - pos.y).collect();
     if dx[0] == dx[1] && dx[0] == dx[2] {
@@ -115,7 +116,7 @@ fn direction_qualifying_positions(pos: &Position, direction: &CompassDirection) 
 }
 
 fn cardinal_direction_is_crowded(
-    occupied: &HashSet<Position>,
+    occupied: &BTreeSet<Position>,
     direction: &CompassDirection,
     pos: &Position,
 ) -> bool {
@@ -125,21 +126,15 @@ fn cardinal_direction_is_crowded(
 }
 
 fn make_proposal(
-    occupied: &HashSet<Position>,
+    occupied: &BTreeSet<Position>,
     direction_order: &[CompassDirection],
     pos: &Position,
 ) -> Option<CompassDirection> {
-    println!("for the elf at position {pos} the direction order is {direction_order:?}");
-
-    for (i, direction) in direction_order.iter().enumerate() {
-        if cardinal_direction_is_crowded(occupied, direction, pos) {
-            println!("elf at {pos} cannot move {direction:?} because the space will be occupied");
-        } else {
-            println!("elf at {pos} proposes to move {direction:?} (preference {i})");
+    for direction in direction_order.iter() {
+        if !cardinal_direction_is_crowded(occupied, direction, pos) {
             return Some(*direction);
         }
     }
-    println!("elf at {pos} seems blocked in every direction");
     None
 }
 
@@ -159,13 +154,21 @@ fn count_proposed_occupancies(
     result
 }
 
+#[cfg(test)]
+fn estimate_rendered_size(maybe_bbox: Option<&BoundingBox>) -> usize {
+    match maybe_bbox {
+        Some(bbox) => {
+            usize::try_from(bbox.bottom_right.y - bbox.top_left.y).unwrap_or(0)
+                * usize::try_from(bbox.bottom_right.x - bbox.top_left.x + 1).unwrap_or(0)
+        }
+        None => 0,
+    }
+}
+
 impl Grove {
     #[cfg(test)]
-    fn render_as_string(&self, bounds: &BoundingBox) -> String {
-        let mut result = String::with_capacity(
-            usize::try_from(bounds.bottom_right.y - bounds.top_left.y).unwrap_or(0)
-                * usize::try_from(bounds.bottom_right.x - bounds.top_left.x + 1).unwrap_or(0),
-        );
+    fn render_as_string(&self, bounds: Option<&BoundingBox>) -> String {
+        let mut result = String::with_capacity(estimate_rendered_size(bounds));
         let emit = |ch| -> Result<(), ()> {
             result.push(ch);
             Ok(())
@@ -174,12 +177,35 @@ impl Grove {
         result
     }
 
-    fn render<F, E>(&self, bounds: &BoundingBox, mut output: F) -> Result<(), E>
+    fn render<F, E>(
+        &self,
+        specified_bounding_box: Option<&BoundingBox>,
+        mut output: F,
+    ) -> Result<(), E>
     where
         F: FnMut(char) -> Result<(), E>,
     {
-        for y in (bounds.top_left.y)..=(bounds.bottom_right.y) {
-            for x in (bounds.top_left.x)..=(bounds.bottom_right.x) {
+        let maybe_computed_bounds = bounds(self.occupied.iter());
+        let bbox = match (specified_bounding_box, maybe_computed_bounds.as_ref()) {
+            (_, None) => {
+                // There are no elves to render at all.
+                return Ok(());
+            }
+            (Some(specified_bounds), Some(computed_bounds)) => {
+                if computed_bounds.top_left.x < specified_bounds.top_left.x
+                    || computed_bounds.top_left.y < specified_bounds.top_left.y
+                    || computed_bounds.bottom_right.x > specified_bounds.bottom_right.x
+                    || computed_bounds.bottom_right.y > specified_bounds.bottom_right.y
+                {
+                    println!("render: warning: actual bounds of elves are greater than the specified bounds (that is, some elves will not be shown; {computed_bounds:?} vs {specified_bounds:?})");
+                }
+                specified_bounds
+            }
+            (None, Some(computed_bounds)) => computed_bounds,
+        };
+
+        for y in (bbox.top_left.y)..=(bbox.bottom_right.y) {
+            for x in (bbox.top_left.x)..=(bbox.bottom_right.x) {
                 output(if self.occupied.contains(&Position { x, y }) {
                     '#'
                 } else {
@@ -193,20 +219,15 @@ impl Grove {
     fn make_proposals(&self) -> HashMap<Position, Option<CompassDirection>> {
         self.occupied
             .iter()
-            .filter(|pos| {
+            .filter_map(|pos| {
                 if self.has_neighbour(pos) {
-                    println!("elf at {pos} has a neighbour, so needs to move");
-                    true
+                    Some((
+                        *pos,
+                        make_proposal(&self.occupied, &self.direction_order, pos),
+                    ))
                 } else {
-                    println!("elf at {pos} has no neighbour, so will stay put");
-                    false
+                    None
                 }
-            })
-            .map(|pos| {
-                (
-                    *pos,
-                    make_proposal(&self.occupied, &self.direction_order, pos),
-                )
             })
             .collect()
     }
@@ -227,15 +248,7 @@ impl Grove {
     }
 
     fn rotate_direction_order(&mut self) {
-        println!(
-            "Before rotation, old direction order is {:?}",
-            &self.direction_order,
-        );
         self.direction_order.rotate_left(1);
-        println!(
-            "After rotation, new direction order is {:?}",
-            &self.direction_order,
-        );
     }
 
     fn iterate(&mut self) -> bool {
@@ -267,10 +280,10 @@ impl Grove {
     fn area_occupied_by_elves(&self) -> usize {
         match bounds(self.occupied.iter()) {
             Some(bounding_box) => {
-                let width: usize = (bounding_box.bottom_right.x - bounding_box.top_left.x)
+                let width: usize = (1_i64 + bounding_box.bottom_right.x - bounding_box.top_left.x)
                     .try_into()
                     .expect("x bounds should not be reversed");
-                let height: usize = (bounding_box.bottom_right.y - bounding_box.top_left.y)
+                let height: usize = (1_i64 + bounding_box.bottom_right.y - bounding_box.top_left.y)
                     .try_into()
                     .expect("y bounds should not be reversed");
                 width * height
@@ -311,23 +324,59 @@ fn large_example() -> &'static str {
 }
 
 #[cfg(test)]
-fn check_iteration_stage_rendering(mut grove: Grove, expected: &[String], bounds: &BoundingBox) {
+fn first_differing_position(
+    a: &str,
+    b: &str,
+    bounds: Option<&BoundingBox>,
+) -> Option<(Position, char, char)> {
+    let mut x: i64 = 0;
+    let mut y: i64 = 0;
+    let top_left: &Position = match bounds {
+        Some(bbox) => &bbox.top_left,
+        None => &Position { x: 0, y: 0 },
+    };
+    for (ach, bch) in a.chars().zip(b.chars()) {
+        if ach != bch {
+            return Some((
+                Position {
+                    x: top_left.x + x,
+                    y: top_left.y + y,
+                },
+                ach,
+                bch,
+            ));
+        }
+        match ach {
+            '\n' => {
+                x = 0;
+                y += 1;
+            }
+            _ => {
+                x += 1;
+            }
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+fn check_iteration_stage_rendering(
+    mut grove: Grove,
+    expected: &[String],
+    bounds: Option<&BoundingBox>,
+) {
     for (iteration, expected_image) in expected.iter().enumerate() {
         let got = grove.render_as_string(bounds);
-        println!(
-            "For iteration {iteration} the preferred move order is {:?}",
-            &grove.direction_order
-        );
-        println!("At start of iteration {iteration}:\n{got}");
         if &got != expected_image {
-            panic!("check_iteration_stage_rendering: mismatch at iteration {iteration}.  Expected:\n{expected_image}\n\nGot:\n{got}");
+            if let Some((diffpos, got_ch, expected_ch)) =
+                first_differing_position(&got, expected_image, bounds)
+            {
+                panic!("check_iteration_stage_rendering: mismatch at iteration {iteration}.  Expected:\n{expected_image}\n\nGot:\n{got}\nPosition of difference is {diffpos}.  It contains '{got_ch}' while we expected '{expected_ch}'.");
+            } else {
+                panic!("got and expected string differ, but first_differing_position didn't locate the difference");
+            }
         }
-        println!("Moving elves for iteration {iteration}...");
         grove.iterate();
-        println!(
-            "At end of iteration {iteration}:\n{}",
-            grove.render_as_string(bounds)
-        );
     }
 }
 
@@ -376,7 +425,7 @@ fn test_small_example() {
         top_left: Position { x: 0, y: 0 },
         bottom_right: Position { x: 4, y: 5 },
     };
-    check_iteration_stage_rendering(grove, &expected, &bounds);
+    check_iteration_stage_rendering(grove, &expected, Some(&bounds));
 }
 
 #[test]
@@ -479,18 +528,20 @@ fn test_large_example() {
         top_left: Position { x: 0, y: 0 },
         bottom_right: Position { x: 13, y: 11 },
     };
-    check_iteration_stage_rendering(grove, &expected, &bounds);
+    check_iteration_stage_rendering(grove, &expected, Some(&bounds));
 }
 
 fn solve_part1(s: &str) -> (usize, Grove) {
     let mut grove = Grove::try_from(s).expect("valid input");
     for _round in 0..10 {
         if !grove.iterate() {
-            println!("stopping early!");
-            break;
+            panic!("stopped early!");
         }
     }
-    (grove.area_occupied_by_elves(), grove)
+    let total_area = grove.area_occupied_by_elves();
+    let elf_count = grove.occupied.len();
+    let empty_ground_tiles = total_area - elf_count;
+    (empty_ground_tiles, grove)
 }
 
 #[test]
