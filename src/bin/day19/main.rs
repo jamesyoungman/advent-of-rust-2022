@@ -58,7 +58,7 @@ impl TryFrom<&str> for RobotType {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 struct Robot {
     which: RobotType,
     costs: Stock,
@@ -96,7 +96,7 @@ impl TryFrom<&str> for Robot {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 struct Blueprint {
     id: u32,
     ore_robot: Robot,
@@ -984,10 +984,66 @@ fn test_solve_part1() {
     assert_eq!(solve_part1(example, &Verbosity::Modest), Some(33));
 }
 
+#[cfg(test)]
+fn just_blueprint_2() -> Blueprint {
+    let example = example_blueprint_string();
+    parse_blueprints(example)
+        .iter()
+        .find(|bp| bp.id == 2)
+        .expect("blueprint 2 should exist")
+        .clone()
+}
+
+#[test]
+fn test_blueprint_2_32_minutes() {
+    let bp2 = just_blueprint_2();
+    let initial_state = State::default();
+    let verbosity = Verbosity::Minimum;
+    let time_liit = Minutes::from(32);
+    let solution = solve_branch_and_bound(initial_state, &bp2, time_liit, &verbosity)
+        .expect("blueprint 2 should have a solution");
+    assert_eq!(solution.score(), 62);
+}
+
+fn solve_part2(s: &str, verbosity: &Verbosity) -> Option<i64> {
+    let mut blueprints = parse_blueprints(s);
+    blueprints.truncate(3); // only keep first 3 for part 2.
+
+    let initial_state = State::default();
+    let solutions: Vec<(&Blueprint, Solution)> = blueprints
+        .iter()
+        .flat_map(|bp| {
+            solve_branch_and_bound(initial_state.clone(), bp, 32, verbosity)
+                .map(|solution| (bp, solution))
+        })
+        .collect();
+    if solutions.len() < blueprints.len() {
+        println!("some blueprints could not be solved");
+        None
+    } else {
+        Some(
+            solutions
+                .iter()
+                .inspect(|(bp, solution)| {
+                    if verbosity.atleast(&Verbosity::Modest) {
+                        println!("\n\n==== Solution for Blueprint {}", bp.id);
+                        solution.explain(bp);
+                    }
+                })
+                .map(|(_, solution)| i64::from(solution.score()))
+                .product(),
+        )
+    }
+}
+
 fn main() {
     let input = str::from_utf8(include_bytes!("input.txt")).expect("valid input");
     println!(
-        "{}",
+        "Day 19 part 1: {}",
         solve_part1(input, &Verbosity::Minimum).expect("should be able to solve part 1")
+    );
+    println!(
+        "Day 19 part 2: {}",
+        solve_part2(input, &Verbosity::Minimum).expect("should be able to solve part 2")
     );
 }
