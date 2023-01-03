@@ -1,4 +1,4 @@
-use std::cmp::Reverse;
+use std::collections::BTreeMap;
 use std::fmt::{Display, Formatter};
 use std::ops::{Index, IndexMut};
 use std::str;
@@ -7,8 +7,21 @@ use sscanf::scanf;
 
 use lib::error::Fail;
 
-type StockCount = i16;
+type StockCount = u16;
 type Minutes = i8;
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+enum Verbosity {
+    Minimum,
+    Modest,
+    Maximum,
+}
+
+impl Verbosity {
+    fn atleast(&self, other: &Verbosity) -> bool {
+        self >= other
+    }
+}
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
 enum RobotType {
@@ -105,11 +118,20 @@ impl Index<&RobotType> for Blueprint {
 }
 
 impl Blueprint {
-    fn any_recipe_requiring_more_than(&self, rt: &RobotType, n: StockCount) -> Option<RobotType> {
+    fn compute_max_requirements(&self) -> Vec<(RobotType, StockCount)> {
         ALL_ROBOT_TYPES
             .iter()
-            .copied()
-            .find(|robot| self[*robot].costs[rt] > n)
+            .map(|ore_type| {
+                (
+                    *ore_type,
+                    ALL_ROBOT_TYPES
+                        .iter()
+                        .map(|robot_type| self[robot_type].costs[ore_type])
+                        .max()
+                        .unwrap_or(0),
+                )
+            })
+            .collect()
     }
 }
 
@@ -219,6 +241,21 @@ fn duration(actions: &[Action]) -> Minutes {
     })
 }
 
+fn ceildiv(n: StockCount, d: StockCount) -> Option<Minutes> {
+    if d != 0 {
+        let result = (n + d - 1) / d;
+        Minutes::try_from(result).ok()
+    } else {
+        None
+    }
+}
+
+#[test]
+fn test_ceildiv() {
+    assert_eq!(ceildiv(10, 5), Some(2));
+    assert_eq!(ceildiv(10, 4), Some(3));
+}
+
 fn minutes_needed_to_cover(
     current: StockCount,
     target: StockCount,
@@ -229,7 +266,7 @@ fn minutes_needed_to_cover(
     } else {
         if acquisition_rate > 0 {
             let shortfall = target - current;
-            Minutes::try_from(shortfall / acquisition_rate).ok()
+            ceildiv(shortfall, acquisition_rate)
         } else {
             None
         }
@@ -239,14 +276,28 @@ fn minutes_needed_to_cover(
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 struct Stock([StockCount; 4]);
 
-impl Stock {
-    fn is_sufficient_for(&self, cost: &Self) -> bool {
-        self.0
+impl Display for Stock {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let mut empty = true;
+        for (i, rt) in ALL_ROBOT_TYPES
             .iter()
-            .zip(cost.0.iter())
-            .all(|(have, need)| have >= need)
+            .filter(|&rt| self[rt] != 0)
+            .enumerate()
+        {
+            if i > 0 {
+                f.write_str(" and ")?;
+            }
+            write!(f, "{} {}", self[rt], rt)?;
+            empty = false;
+        }
+        if empty {
+            f.write_str("nothing")?;
+        }
+        Ok(())
     }
+}
 
+impl Stock {
     /// Given current stock levels and already-built robots, compute
     /// how long it will take for us to cover the cost of building
     /// some other robot.  Return None if we cannot collect enough
@@ -351,14 +402,7 @@ impl State {
         &self,
         blueprint: &Blueprint,
         minutes_remaining: Minutes,
-    ) -> Vec<(State, Vec<Action>)> {
-        self.possible_next_states_bigsteps(blueprint, minutes_remaining)
-    }
-
-    fn possible_next_states_bigsteps(
-        &self,
-        blueprint: &Blueprint,
-        minutes_remaining: Minutes,
+        max_requirement_by_type: &[(RobotType, StockCount)],
     ) -> Vec<(State, Vec<Action>)> {
         let select_actions = |actions: Vec<Action>| -> (State, Vec<Action>) {
             assert!(duration(&actions) <= minutes_remaining);
@@ -374,7 +418,27 @@ impl State {
             return vec![select_actions(vec![Action::Idle(1)])];
         }
         let mut result = Vec::with_capacity(ALL_ROBOT_TYPES.len() + 1);
-        for rt in ALL_ROBOT_TYPES.iter().rev() {
+        for (rt, (max_requirement_rt, max_requirement_count)) in ALL_ROBOT_TYPES
+            .iter()
+            .zip(max_requirement_by_type.iter())
+            .rev()
+        {
+            assert_eq!(rt, max_requirement_rt);
+            if rt != &RobotType::Geode && max_requirement_count <= &self.robots[rt] {
+                // This blueprint never calls for more of this ore
+                // than we already have robots on hand, so in the 1
+                // minute it takes the factory to consume that
+                // resource, we will generate enough of that resource
+                // to make another robot, in the same time it takes to
+                // build a robot.  So we don't need any more of that
+                // kind of robot.
+                //
+                // The obvious exception here is geodes.  No revipe
+                // requires geodes to make a robot, but we should
+                // still construct geode robots, because we want
+                // geodes.
+                continue;
+            }
             if let Some(t) = self
                 .ores
                 .minutes_needed_to_cover_cost(&blueprint[rt].costs, &self.robots)
@@ -402,98 +466,81 @@ impl State {
         result
     }
 
-    fn possible_next_states_tinysteps(
-        &self,
-        blueprint: &Blueprint,
-        minutes_remaining: Minutes,
-    ) -> Vec<(State, Vec<Action>)> {
-        let select_actions = |actions: Vec<Action>| -> (State, Vec<Action>) {
-            let next_state = self.with_actions(&actions, blueprint);
-            (next_state, actions)
-        };
-
-        if minutes_remaining < 1 {
-            return vec![];
-        } else if minutes_remaining == 1 {
-            // There's no point building anything, because the
-            // resulting robot would have no time to do anything.
-            return vec![select_actions(vec![Action::Idle(1)])];
-        }
-
-        let mut result = Vec::with_capacity(ALL_ROBOT_TYPES.len() + 1);
-        for rt in ALL_ROBOT_TYPES.iter().rev() {
-            let cost: &Stock = &blueprint[rt].costs;
-            if self.ores.is_sufficient_for(cost) {
-                if rt == &RobotType::Geode {
-                    result.push(select_actions(vec![Action::Build(*rt)]));
-                } else {
-                    // We could build a robot of type `rt`.  But if we
-                    // already have N such robots, this is only useful if
-                    // the blueprint contains at least one robot type
-                    // which needs more than N units of that resource.
-                    // This is so because we will already get N units of
-                    // the resource each turn,m and can never use up more
-                    // than N units per turn.
-                    let robots_onhand = self.robots[rt];
-                    if blueprint
-                        .any_recipe_requiring_more_than(rt, robots_onhand)
-                        .is_some()
-                    {
-                        result.push(select_actions(vec![Action::Build(*rt)]));
-                    }
-                }
-            }
-        }
-        result.push((
-            self.with_actions(&[Action::Idle(1)], blueprint),
-            vec![Action::Idle(1)],
-        ));
-        result
-    }
-
-    fn start_build(&mut self, action: &Action, blueprint: &Blueprint) {
+    fn start_build(&mut self, action: &Action, blueprint: &Blueprint, verbosity: &Verbosity) {
         match action {
             Action::Build(robot_type) => {
                 let cost: &Stock = &blueprint[robot_type].costs;
                 self.ores.consume(cost);
+                if verbosity.atleast(&Verbosity::Maximum) {
+                    println!("Spend {cost} to start building a {robot_type}-collecting robot");
+                    println!("You now have {}.", &self.ores);
+                }
             }
             Action::Idle(_) => (),
         }
     }
 
-    fn complete_build(&mut self, action: &Action) {
+    fn complete_build(&mut self, action: &Action, verbosity: &Verbosity) {
         match action {
             Action::Build(robot_type) => {
                 self.robots[robot_type] += 1;
+                if verbosity.atleast(&Verbosity::Maximum) {
+                    println!(
+                        "The {robot_type}-collecting robot is ready; you now have {} of them.",
+                        self.robots[robot_type]
+                    );
+                }
             }
             Action::Idle(_) => (),
         }
     }
 
-    fn harvest_resources(&mut self, minutes: Minutes) {
-        let duration =
-            StockCount::try_from(minutes).expect("idle duration should be in range of StockCount");
+    fn harvest_resources(&mut self, verbosity: &Verbosity) {
         for rt in ALL_ROBOT_TYPES.iter() {
-            self.ores[rt] += self.robots[rt] * duration;
+            let added = self.robots[rt];
+            self.ores[rt] += added;
+            if added > 0 && verbosity.atleast(&Verbosity::Maximum) {
+                println!(
+                    "{} {}-collecting robot(s) collect(s) {} {}; you now have {} {}",
+                    self.robots[rt], rt, self.robots[rt], rt, self.ores[rt], rt
+                );
+            }
         }
     }
 
-    fn simulate_action(&mut self, action: &Action, blueprint: &Blueprint) {
+    fn simulate_action(
+        &mut self,
+        action: &Action,
+        time: &mut Minutes,
+        blueprint: &Blueprint,
+        verbosity: &Verbosity,
+    ) {
         match &action {
             Action::Build(_) => {
-                self.start_build(action, blueprint);
-                self.harvest_resources(1);
-                self.complete_build(action);
+                if verbosity.atleast(&Verbosity::Maximum) {
+                    println!("\n== Minute {time} ==");
+                }
+                self.start_build(action, blueprint, verbosity);
+                self.harvest_resources(verbosity);
+                self.complete_build(action, verbosity);
+                *time += 1;
             }
             Action::Idle(n) => {
-                self.harvest_resources(*n);
+                for _ in 0..*n {
+                    if verbosity.atleast(&Verbosity::Maximum) {
+                        println!("\n== Minute {time} ==");
+                    }
+                    self.harvest_resources(verbosity);
+                    *time += 1;
+                }
             }
         }
     }
 
     fn with_actions(&self, actions: &[Action], blueprint: &Blueprint) -> State {
         actions.iter().fold(self.clone(), |mut state, action| {
-            state.simulate_action(action, blueprint);
+            let mut dummy_time = 0;
+            state.simulate_action(action, &mut dummy_time, blueprint, &Verbosity::Minimum);
             state
         })
     }
@@ -517,8 +564,15 @@ struct Solution {
 }
 
 impl Solution {
-    fn has_more_geodes_than(&self, other: &Solution) -> bool {
-        self.score > other.score
+    fn explain(&self, blueprint: &Blueprint) {
+        let end_state =
+            self.actions
+                .iter()
+                .fold((1, State::default()), |(mut t, mut state), action| {
+                    state.simulate_action(action, &mut t, blueprint, &Verbosity::Maximum);
+                    (t, state)
+                });
+        println!("final state: {end_state:?}");
     }
 
     fn is_single_candidate(&self, minutes_remaining: Minutes) -> bool {
@@ -582,11 +636,72 @@ fn construct_worst_solution(
     }
 }
 
-#[derive(PartialOrd, Ord, Eq, PartialEq, Debug)]
+#[derive(PartialOrd, Ord, Eq, PartialEq, Debug, Clone, Copy)]
 struct Priority(StockCount);
 
-fn rev_priority<S: Scored>(thing: &S) -> Reverse<Priority> {
-    Reverse(Priority(thing.score()))
+fn priority<S: Scored>(thing: &S) -> Priority {
+    Priority(thing.score())
+}
+
+#[derive(Debug, Default)]
+struct BasicPriorityQueue<T, P> {
+    items: BTreeMap<P, Vec<T>>,
+}
+
+impl<T, P> BasicPriorityQueue<T, P> {
+    fn new() -> BasicPriorityQueue<T, P> {
+        BasicPriorityQueue {
+            items: BTreeMap::new(),
+        }
+    }
+
+    fn insert(&mut self, item: T, pri: P)
+    where
+        P: Ord + PartialOrd,
+    {
+        if !self.items.contains_key(&pri) {
+            self.items.insert(pri, vec![item]);
+        } else {
+            match self.items.get_mut(&pri) {
+                Some(v) => {
+                    v.push(item);
+                }
+                None => unreachable!(),
+            }
+        }
+    }
+
+    fn pop(&mut self) -> Option<T>
+    where
+        P: PartialOrd + Ord + Copy,
+    {
+        let mut goners: Vec<P> = Vec::new();
+        let mut result: Option<T> = None;
+        for (pri, items) in self.items.iter_mut().rev() {
+            let r = items.pop();
+            if items.is_empty() {
+                goners.push(*pri);
+            }
+            if r.is_some() {
+                result = r;
+                break;
+            }
+        }
+        for pri in goners.into_iter() {
+            self.items.remove(&pri);
+        }
+        result
+    }
+}
+
+#[test]
+fn test_basic_priority_queue() {
+    let mut pq = BasicPriorityQueue::default();
+    pq.insert('g', 10);
+    pq.insert('k', 20);
+    assert_eq!(pq.pop(), Some('k'));
+    assert_eq!(pq.pop(), Some('g'));
+    assert_eq!(pq.pop(), None);
 }
 
 fn branch(
@@ -594,14 +709,16 @@ fn branch(
     current_optimum: &BranchBoundNode,
     blueprint: &Blueprint,
     _total_minutes: Minutes,
-    pq: &mut Vec<BranchBoundNode>,
+    max_requirements_by_ore_type: &[(RobotType, StockCount)],
+    pq: &mut BasicPriorityQueue<BranchBoundNode, Priority>,
 ) -> usize {
     let mut pruned: usize = 0;
     if node.minutes_remaining > 0 {
-        for (next_state, actions) in node
-            .state
-            .possible_next_states(blueprint, node.minutes_remaining)
-        {
+        for (next_state, actions) in node.state.possible_next_states(
+            blueprint,
+            node.minutes_remaining,
+            max_requirements_by_ore_type,
+        ) {
             let ub = next_state.naive_upper_bound(node.minutes_remaining - duration(&actions));
             let current = current_optimum.state.score();
             if ub < current {
@@ -610,7 +727,8 @@ fn branch(
                 pruned += 1;
             } else {
                 let next = node.with_actions(actions, blueprint);
-                pq.push(next);
+                let pri = priority(&next.state);
+                pq.insert(next, pri);
             }
         }
         //println!("branch: fanout is {fanout}");
@@ -624,13 +742,20 @@ fn solve_branch_and_bound(
     state: State,
     blueprint: &Blueprint,
     initial_minutes_remaining: Minutes,
+    verbosity: &Verbosity,
 ) -> Option<Solution> {
-    println!("solving for blueprint {}", blueprint.id);
+    if verbosity.atleast(&Verbosity::Maximum) {
+        println!(
+            "solving for blueprint {} with branch-and-bound...",
+            blueprint.id
+        );
+    }
+    let max_requirements_by_ore_type = blueprint.compute_max_requirements();
+
     assert!(initial_minutes_remaining > 0);
     let mut prune_count: usize = 0;
     let mut current_optimum: BranchBoundNode =
         construct_worst_solution(state.clone(), initial_minutes_remaining, blueprint);
-    let initial_rp = rev_priority(&state);
     let state_score = state.score();
     let total_robots = state.total_robots();
     let initial = BranchBoundNode {
@@ -643,8 +768,9 @@ fn solve_branch_and_bound(
         minutes_remaining: initial_minutes_remaining,
     };
 
-    let mut pq: Vec<BranchBoundNode> = Vec::new();
-    pq.push(initial);
+    let mut pq = BasicPriorityQueue::new();
+    let pri = priority(&initial.state);
+    pq.insert(initial, pri);
 
     while let Some(partial_node) = pq.pop() {
         if partial_node
@@ -664,18 +790,21 @@ fn solve_branch_and_bound(
                 &current_optimum,
                 blueprint,
                 initial_minutes_remaining,
+                &max_requirements_by_ore_type,
                 &mut pq,
             );
         }
     }
-    println!("{prune_count} branches were pruned");
+    if verbosity.atleast(&Verbosity::Maximum) {
+        println!("{prune_count} branches were pruned");
+    }
     assert!(current_optimum
         .partial_solution
         .is_single_candidate(initial_minutes_remaining));
     Some(current_optimum.partial_solution)
 }
 
-//#[cfg(test)]
+#[cfg(test)]
 fn example_blueprint_string() -> &'static str {
     concat!(
         "Blueprint 1:",
@@ -699,7 +828,7 @@ fn parse_blueprints(s: &str) -> Vec<Blueprint> {
         .collect()
 }
 
-//#[cfg(test)]
+#[cfg(test)]
 fn example_blueprints() -> Vec<Blueprint> {
     parse_blueprints(example_blueprint_string())
 }
@@ -709,7 +838,8 @@ fn example_walkthrough() {
     let blueprint = &example_blueprints()[0];
     let mut state = State::default();
     assert_eq!(state.robots[RobotType::Ore], 1);
-    state.simulate_action(&Action::Idle(1), &blueprint);
+    let mut time = 1;
+    state.simulate_action(&Action::Idle(1), &mut time, &blueprint, &Verbosity::Maximum);
     assert_eq!(
         state,
         State {
@@ -717,7 +847,7 @@ fn example_walkthrough() {
             robots: Stock::new(&[(RobotType::Ore, 1)]),
         }
     );
-    state.simulate_action(&Action::Idle(1), &blueprint);
+    state.simulate_action(&Action::Idle(1), &mut time, &blueprint, &Verbosity::Maximum);
     assert_eq!(
         state,
         State {
@@ -725,7 +855,12 @@ fn example_walkthrough() {
             robots: Stock::new(&[(RobotType::Ore, 1)]),
         }
     );
-    state.simulate_action(&Action::Build(RobotType::Clay), &blueprint);
+    state.simulate_action(
+        &Action::Build(RobotType::Clay),
+        &mut time,
+        &blueprint,
+        &Verbosity::Maximum,
+    );
     assert_eq!(
         state,
         State {
@@ -763,7 +898,8 @@ fn blueprint_1_max_2() {
             (RobotType::Geode, 2),
         ]),
     };
-    let solution = solve_branch_and_bound(state, &blueprint, 3).expect("should find a solution");
+    let solution = solve_branch_and_bound(state, &blueprint, 3, &Verbosity::Maximum)
+        .expect("should find a solution");
     dbg!(&solution);
     assert_eq!(solution.score, 9);
 }
@@ -787,12 +923,7 @@ fn blueprint_1_max_6() {
             (RobotType::Geode, 0),
         ]),
     };
-    let bf_solution =
-        solve_branch_and_bound(state.clone(), &blueprint, 7).expect("should find a solution");
-    dbg!(&bf_solution);
-    assert_eq!(bf_solution.score, 9);
-
-    let bb_solution = solve_branch_and_bound(state, blueprint, 7);
+    let bb_solution = solve_branch_and_bound(state, blueprint, 7, &Verbosity::Maximum);
     dbg!(&bb_solution);
     match bb_solution {
         Some(solution) => {
@@ -818,14 +949,14 @@ fn quality_level(bp_id: u32, score: StockCount) -> i64 {
     i64::from(bp_id) * i64::from(score)
 }
 
-fn solve_part1(s: &str) -> Option<i64> {
+fn solve_part1(s: &str, verbosity: &Verbosity) -> Option<i64> {
     let blueprints = parse_blueprints(s);
     let initial_state = State::default();
     let solutions: Vec<(&Blueprint, Solution)> = blueprints
         .iter()
         .map(|bp| {
-            println!("solving blueprint {}...", bp.id);
-            solve_branch_and_bound(initial_state.clone(), bp, 24).map(|solution| (bp, solution))
+            solve_branch_and_bound(initial_state.clone(), bp, 24, verbosity)
+                .map(|solution| (bp, solution))
         })
         .filter_map(|sol| sol)
         .collect();
@@ -838,8 +969,11 @@ fn solve_part1(s: &str) -> Option<i64> {
                 .iter()
                 .map(|(bp, solution)| {
                     let q = quality_level(bp.id, solution.score());
-                    println!("optimum solution for blueprint {} {solution:?}", bp.id);
-                    println!("quality level of blueprint {} is {q}", bp.id);
+                    if verbosity.atleast(&Verbosity::Modest) {
+                        println!("optimum solution for blueprint {} {solution:?}", bp.id);
+                        solution.explain(bp);
+                        println!("quality level of blueprint {} is {q}", bp.id);
+                    }
                     q
                 })
                 .sum(),
@@ -847,14 +981,16 @@ fn solve_part1(s: &str) -> Option<i64> {
     }
 }
 
-//#[test]
+#[test]
 fn test_solve_part1() {
     let example = example_blueprint_string();
-    assert_eq!(solve_part1(example), Some(33));
+    assert_eq!(solve_part1(example, &Verbosity::Modest), Some(33));
 }
 
 fn main() {
-    //let input = str::from_utf8(include_bytes!("input.txt")).expect("valid input");
-    let example = example_blueprint_string();
-    println!("{:?}", solve_part1(example));
+    let input = str::from_utf8(include_bytes!("input.txt")).expect("valid input");
+    println!(
+        "{}",
+        solve_part1(input, &Verbosity::Minimum).expect("should be able to solve part 1")
+    );
 }
