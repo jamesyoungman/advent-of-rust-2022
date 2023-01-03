@@ -263,13 +263,11 @@ fn minutes_needed_to_cover(
 ) -> Option<Minutes> {
     if current >= target {
         Some(0) // we have enough on hand already
+    } else if acquisition_rate > 0 {
+        let shortfall = target - current;
+        ceildiv(shortfall, acquisition_rate)
     } else {
-        if acquisition_rate > 0 {
-            let shortfall = target - current;
-            ceildiv(shortfall, acquisition_rate)
-        } else {
-            None
-        }
+        None
     }
 }
 
@@ -657,10 +655,10 @@ impl<T, P> BasicPriorityQueue<T, P> {
 
     fn insert(&mut self, item: T, pri: P)
     where
-        P: Ord + PartialOrd,
+        P: Ord + PartialOrd + Copy,
     {
-        if !self.items.contains_key(&pri) {
-            self.items.insert(pri, vec![item]);
+        if let std::collections::btree_map::Entry::Vacant(e) = self.items.entry(pri) {
+            e.insert(vec![item]);
         } else {
             match self.items.get_mut(&pri) {
                 Some(v) => {
@@ -954,11 +952,10 @@ fn solve_part1(s: &str, verbosity: &Verbosity) -> Option<i64> {
     let initial_state = State::default();
     let solutions: Vec<(&Blueprint, Solution)> = blueprints
         .iter()
-        .map(|bp| {
+        .flat_map(|bp| {
             solve_branch_and_bound(initial_state.clone(), bp, 24, verbosity)
                 .map(|solution| (bp, solution))
         })
-        .filter_map(|sol| sol)
         .collect();
     if solutions.len() < blueprints.len() {
         println!("some blueprints could not be solved");
