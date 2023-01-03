@@ -427,11 +427,10 @@ impl State {
                 // than we already have robots on hand, so in the 1
                 // minute it takes the factory to consume that
                 // resource, we will generate enough of that resource
-                // to make another robot, in the same time it takes to
-                // build a robot.  So we don't need any more of that
-                // kind of robot.
+                // to make another robot.  So we don't need any more
+                // of that kind of robot.
                 //
-                // The obvious exception here is geodes.  No revipe
+                // The obvious exception here is geodes.  No recipe
                 // requires geodes to make a robot, but we should
                 // still construct geode robots, because we want
                 // geodes.
